@@ -134,8 +134,18 @@ List<FileHashModel> _decodeHashes(String source) {
 }
 
 bool _shouldSkipHash(String relativePath) {
-  return relativePath == "hashes.json" ||
-      relativePath == ".DS_Store" ||
-      relativePath == ".desktop_updater_manifest.json" ||
-      relativePath.startsWith("update/");
+ // Ubah ke lowercase agar tidak sensitif terhadap penulisan kapital
+  final path = relativePath.toLowerCase();
+  
+  return path == "hashes.json" ||
+      path == ".ds_store" ||
+      path == ".desktop_updater_manifest.json" ||
+      path.startsWith("update/") ||
+
+      path.endsWith("unins000.exe") || // Uninstaller bawaan Inno Setup
+      path.endsWith("unins000.dat") || // Data log Inno Setup (Sangat Vital!)
+      path.endsWith("unins000.msg") || 
+      path.contains("vcruntime140") || // Library runtime C++ bawaan OS/Installer
+      path.contains("msvcp140") ||
+      path.endsWith(".lnk");
 }
