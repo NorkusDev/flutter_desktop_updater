@@ -86,7 +86,7 @@ Future<FileHashDiff> diffFileHashes(
   return FileHashDiff(changedFiles: changedFiles, removedFiles: removedFiles);
 }
 
-Future<String> genFileHashes({String? path}) async {
+Future<String> genFileHashes({String? path, List<String>? skipHashes}) async {
   final dir = hashRootDirectory(pathValue: path);
 
   if (await dir.exists()) {
@@ -101,7 +101,8 @@ Future<String> genFileHashes({String? path}) async {
           p.relative(entity.path, from: dir.path),
         );
 
-        if (_shouldSkipHash(relativePath)) {
+        if (_shouldSkipHash(relativePath) ||
+            (skipHashes?.contains(relativePath) ?? false)) {
           continue;
         }
 

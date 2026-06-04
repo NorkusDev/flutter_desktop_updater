@@ -2,7 +2,11 @@ import "package:desktop_updater/desktop_updater.dart";
 import "package:flutter/material.dart";
 
 class DesktopUpdaterController extends ChangeNotifier {
-  DesktopUpdaterController({required Uri? appArchiveUrl, this.localization}) {
+  DesktopUpdaterController({
+    required Uri? appArchiveUrl,
+    this.localization,
+    this.skipHashes,
+  }) {
     if (appArchiveUrl != null) {
       init(appArchiveUrl);
     }
@@ -10,6 +14,8 @@ class DesktopUpdaterController extends ChangeNotifier {
 
   DesktopUpdateLocalization? localization;
   DesktopUpdateLocalization? get getLocalization => localization;
+
+  List<String>? skipHashes;
 
   String? _appName;
   String? get appName => _appName;
@@ -78,6 +84,7 @@ class DesktopUpdaterController extends ChangeNotifier {
 
     final versionResponse = await _plugin.versionCheck(
       appArchiveUrl: appArchiveUrl.toString(),
+      skipHashes: skipHashes,
     );
 
     if (versionResponse?.url != null) {

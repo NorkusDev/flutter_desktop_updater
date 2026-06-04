@@ -8,6 +8,7 @@ import "package:path/path.dart" as path;
 
 Future<List<FileHashModel?>> prepareUpdateAppFunction({
   required String remoteUpdateFolder,
+  List<String>? skipHashes,
 }) async {
   final tempDir = await Directory.systemTemp.createTemp("desktop_updater_");
 
@@ -28,7 +29,7 @@ Future<List<FileHashModel?>> prepareUpdateAppFunction({
       destination: newHashFile,
     );
 
-    final oldHashFilePath = await genFileHashes();
+    final oldHashFilePath = await genFileHashes(skipHashes: skipHashes);
     return await verifyFileHashes(oldHashFilePath, newHashFile.path);
   } finally {
     if (await tempDir.exists()) {

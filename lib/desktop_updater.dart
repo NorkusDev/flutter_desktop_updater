@@ -54,8 +54,8 @@ class DesktopUpdater {
     return verifyFileHashes(oldHashFilePath, newHashFilePath);
   }
 
-  Future<String?> generateFileHashes({String? path}) {
-    return genFileHashes(path: path);
+  Future<String?> generateFileHashes({String? path, List<String>? skipHashes}) {
+    return genFileHashes(path: path, skipHashes: skipHashes);
   }
 
   Future<Stream<UpdateProgress>> updateApp({
@@ -72,15 +72,25 @@ class DesktopUpdater {
 
   Future<List<FileHashModel?>> prepareUpdateApp({
     required String remoteUpdateFolder,
+    List<String>? skipHashes,
   }) {
-    return prepareUpdateAppFunction(remoteUpdateFolder: remoteUpdateFolder);
+    return prepareUpdateAppFunction(
+      remoteUpdateFolder: remoteUpdateFolder,
+      skipHashes: skipHashes,
+    );
   }
 
   Future<String?> getCurrentVersion() {
     return DesktopUpdaterPlatform.instance.getCurrentVersion();
   }
 
-  Future<ItemModel?> versionCheck({required String appArchiveUrl}) {
-    return versionCheckFunction(appArchiveUrl: appArchiveUrl);
+  Future<ItemModel?> versionCheck({
+    required String appArchiveUrl,
+    List<String>? skipHashes,
+  }) {
+    return versionCheckFunction(
+      appArchiveUrl: appArchiveUrl,
+      skipHashes: skipHashes,
+    );
   }
 }

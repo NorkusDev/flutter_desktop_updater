@@ -8,7 +8,10 @@ import "package:desktop_updater/src/release_manifest.dart";
 import "package:desktop_updater/src/remote_file.dart";
 import "package:path/path.dart" as path;
 
-Future<ItemModel?> versionCheckFunction({required String appArchiveUrl}) async {
+Future<ItemModel?> versionCheckFunction({
+  required String appArchiveUrl,
+  List<String>? skipHashes,
+}) async {
   final tempDir = await Directory.systemTemp.createTemp("desktop_updater_");
 
   try {
@@ -53,7 +56,7 @@ Future<ItemModel?> versionCheckFunction({required String appArchiveUrl}) async {
       destination: newHashFile,
     );
 
-    final oldHashFilePath = await genFileHashes();
+    final oldHashFilePath = await genFileHashes(skipHashes: skipHashes);
     final diff = await diffFileHashes(oldHashFilePath, newHashFile.path);
 
     if (diff.changedFiles.isEmpty && diff.removedFiles.isEmpty) {
