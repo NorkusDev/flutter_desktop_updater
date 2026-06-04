@@ -15,6 +15,42 @@ class FileHashDiff {
   final List<String> removedFiles;
 }
 
+List<String> _dynamicSkipList = [];
+
+Future<void> loadUpdaterConfig(File configFile) async {
+  try {
+    if (await configFile.exists()) {
+      final yamlString = await configFile.readAsString();
+      final yamlDoc = loadYaml(yamlString);
+      
+      if (yamlDoc != null && yamlDoc['desktop_updater'] != null) {
+        final config = yamlDoc['desktop_updater'];
+
+        if (config['skip_hashes'] != null) {
+          final YamlList skipList = config['skip_hashes'];
+          _dynamicSkipList = skipList.map((e) => e.toString()).toList();
+          return;
+        }
+      }
+    }
+    _setDefaultSkips();
+  } catch (e) {
+    print("Error loading config dari ${configFile.path}: $e. Menggunakan default.");
+    _setDefaultSkips();
+  }
+}
+
+void _setDefaultSkips() {
+  _dynamicSkipList = [
+    "hashes.json",
+    ".DS_Store",
+    ".desktop_updater_manifest.json",
+    ".desktop_updater_release_manifest.json",
+    "release-manifest.json",
+    "update/"
+  ];
+}
+
 Future<String> getFileHash(File file) async {
   try {
     final List<int> fileBytes = await file.readAsBytes();
@@ -86,7 +122,13 @@ Future<FileHashDiff> diffFileHashes(
   return FileHashDiff(changedFiles: changedFiles, removedFiles: removedFiles);
 }
 
-Future<String> genFileHashes({String? path}) async {
+Future<String> genFileHashes({String? path, String? configPath}) async {
+
+  final String finalConfigPath = configPath ?? p.join(Directory.current.path, "pubspec.yaml");
+  final configFile = File(finalConfigPath);
+
+  await loadUpdaterConfig(configFile);
+  
   final dir = hashRootDirectory(pathValue: path);
 
   if (await dir.exists()) {
@@ -134,10 +176,16 @@ List<FileHashModel> _decodeHashes(String source) {
 }
 
 bool _shouldSkipHash(String relativePath) {
-  return relativePath == "hashes.json" ||
-      relativePath == ".DS_Store" ||
-      relativePath == ".desktop_updater_manifest.json" ||
-      relativePath == ".desktop_updater_release_manifest.json" ||
-      relativePath == "release-manifest.json" ||
-      relativePath.startsWith("update/");
+  for (final rule in _dynamicSkipList) {
+    if (rule.endsWith('/')) {
+      if (relativePath.startsWith(rule)) {
+        return true;
+      }
+    } else {
+      if (relativePath == rule) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
