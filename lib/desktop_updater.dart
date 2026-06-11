@@ -25,9 +25,22 @@ class DesktopUpdater {
     return Future.value("Hello from DesktopUpdater!");
   }
 
-  /// Uygulamayı kapatır ve yeniden başlatır
-  Future<void> restartApp() {
+  Future<void> restartApp({String? stagingPath}) {
+    if (stagingPath != null) {
+      return installUpdate(stagingPath: stagingPath);
+    }
+
     return DesktopUpdaterPlatform.instance.restartApp();
+  }
+
+  Future<void> installUpdate({
+    required String stagingPath,
+    List<String> removedFiles = const [],
+  }) {
+    return DesktopUpdaterPlatform.instance.installUpdate(
+      stagingPath: stagingPath,
+      removedFiles: removedFiles,
+    );
   }
 
   Future<String?> getExecutablePath() {
@@ -41,24 +54,30 @@ class DesktopUpdater {
     return verifyFileHashes(oldHashFilePath, newHashFilePath);
   }
 
-  Future<String?> generateFileHashes({String? path}) {
-    return genFileHashes(path: path);
+  Future<String?> generateFileHashes({String? path, List<String>? skipHashes}) {
+    return genFileHashes(path: path, skipHashes: skipHashes);
   }
 
   Future<Stream<UpdateProgress>> updateApp({
     required String remoteUpdateFolder,
     required List<FileHashModel?> changedFiles,
+    String manifestPath = "release-manifest.json",
   }) {
     return updateAppFunction(
       remoteUpdateFolder: remoteUpdateFolder,
       changes: changedFiles,
+      manifestPath: manifestPath,
     );
   }
 
   Future<List<FileHashModel?>> prepareUpdateApp({
     required String remoteUpdateFolder,
+    List<String>? skipHashes,
   }) {
-    return prepareUpdateAppFunction(remoteUpdateFolder: remoteUpdateFolder);
+    return prepareUpdateAppFunction(
+      remoteUpdateFolder: remoteUpdateFolder,
+      skipHashes: skipHashes,
+    );
   }
 
   Future<String?> getCurrentVersion() {
@@ -67,7 +86,11 @@ class DesktopUpdater {
 
   Future<ItemModel?> versionCheck({
     required String appArchiveUrl,
+    List<String>? skipHashes,
   }) {
-    return versionCheckFunction(appArchiveUrl: appArchiveUrl);
+    return versionCheckFunction(
+      appArchiveUrl: appArchiveUrl,
+      skipHashes: skipHashes,
+    );
   }
 }

@@ -5,6 +5,7 @@ class DesktopUpdaterController extends ChangeNotifier {
   DesktopUpdaterController({
     required Uri? appArchiveUrl,
     this.localization,
+    this.skipHashes,
   }) {
     if (appArchiveUrl != null) {
       init(appArchiveUrl);
@@ -13,6 +14,8 @@ class DesktopUpdaterController extends ChangeNotifier {
 
   DesktopUpdateLocalization? localization;
   DesktopUpdateLocalization? get getLocalization => localization;
+
+  List<String>? skipHashes;
 
   String? _appName;
   String? get appName => _appName;
@@ -50,6 +53,9 @@ class DesktopUpdaterController extends ChangeNotifier {
   double get downloadedSize => _downloadedSize;
 
   List<FileHashModel?>? _changedFiles;
+  List<String> _removedFiles = const [];
+  String? _stagingPath;
+  String _manifestPath = "release-manifest.json";
 
   List<ChangeModel?>? _releaseNotes;
   List<ChangeModel?>? get releaseNotes => _releaseNotes;
@@ -78,6 +84,7 @@ class DesktopUpdaterController extends ChangeNotifier {
 
     final versionResponse = await _plugin.versionCheck(
       appArchiveUrl: appArchiveUrl.toString(),
+      skipHashes: skipHashes,
     );
 
     if (versionResponse?.url != null) {
@@ -87,16 +94,16 @@ class DesktopUpdaterController extends ChangeNotifier {
       _folderUrl = versionResponse?.url;
       _isMandatory = versionResponse?.mandatory ?? false;
 
-      // Calculate total length in KB
+      // Calculate total length in bytes.
       _downloadSize = (versionResponse?.changedFiles?.fold<double>(
             0,
-            (previousValue, element) =>
-                previousValue + ((element?.length ?? 0) / 1024.0),
+            (previousValue, element) => previousValue + (element?.length ?? 0),
           )) ??
           0.0;
 
-      // Get changed files liste
       _changedFiles = versionResponse?.changedFiles;
+      _removedFiles = versionResponse?.removedFiles ?? const [];
+      _manifestPath = versionResponse?.manifestPath ?? "release-manifest.json";
       _releaseNotes = versionResponse?.changes;
       _appName = versionResponse?.appName;
       _appVersion = versionResponse?.version;
@@ -112,47 +119,56 @@ class DesktopUpdaterController extends ChangeNotifier {
       throw Exception("Folder URL is not set");
     }
 
-    if (_changedFiles == null && _changedFiles!.isEmpty) {
+    if (_changedFiles == null) {
       throw Exception("Changed files are not set");
     }
+
+    _isDownloading = true;
+    _isDownloaded = false;
+    _downloadProgress = 0;
+    _downloadedSize = 0;
+    _stagingPath = null;
+    notifyListeners();
 
     final stream = await _plugin.updateApp(
       remoteUpdateFolder: _folderUrl!,
       changedFiles: _changedFiles ?? [],
+      manifestPath: _manifestPath,
     );
 
-    stream.listen(
-      (event) {
+    try {
+      await for (final event in stream) {
         _updateProgress = event;
-
-        // if (_downloadProgress >= 1.0) {
-        //   _isDownloading = false;
-        //   _downloadProgress = 1.0;
-        //   _downloadedSize = _downloadSize;
-        //   _isDownloaded = true;
-
-        //   notifyListeners();
-        //   return;
-        // }
-
+        _stagingPath = event.stagingDirectory ?? _stagingPath;
         _isDownloading = true;
         _isDownloaded = false;
-        _downloadProgress = event.receivedBytes / event.totalBytes;
-        _downloadedSize = _downloadSize * _downloadProgress;
+        _downloadProgress = event.fraction;
+        _downloadedSize = event.receivedBytes;
         notifyListeners();
-      },
-      onDone: () {
-        _isDownloading = false;
-        _downloadProgress = 1.0;
-        _downloadedSize = _downloadSize;
-        _isDownloaded = true;
+      }
 
-        notifyListeners();
-      },
-    );
+      _isDownloading = false;
+      _downloadProgress = 1.0;
+      _downloadedSize = _downloadSize;
+      _isDownloaded = true;
+      notifyListeners();
+    } catch (_) {
+      _isDownloading = false;
+      _isDownloaded = false;
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void restartApp() {
-    _plugin.restartApp();
+  Future<void> restartApp() async {
+    final stagingPath = _stagingPath;
+    if (stagingPath == null || stagingPath.isEmpty) {
+      throw StateError("No downloaded update is ready to install");
+    }
+
+    await _plugin.installUpdate(
+      stagingPath: stagingPath,
+      removedFiles: _removedFiles,
+    );
   }
 }

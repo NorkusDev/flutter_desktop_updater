@@ -4,6 +4,8 @@ import "dart:io";
 import "package:path/path.dart" as path;
 import "package:pubspec_parse/pubspec_parse.dart";
 
+import "helper/copy.dart";
+
 Future<void> main(List<String> args) async {
   if (args.isEmpty) {
     print("PLATFORM must be specified: macos, windows, linux");
@@ -25,6 +27,10 @@ Future<void> main(List<String> args) async {
   final buildName =
       "${parsed.version?.major}.${parsed.version?.minor}.${parsed.version?.patch}";
   final buildNumber = parsed.version?.build.firstOrNull.toString();
+  if (buildNumber == null || buildNumber.isEmpty) {
+    print("pubspec.yaml version must include a build number.");
+    exit(1);
+  }
 
   print(
     "Building version $buildName+$buildNumber for $platform for app ${parsed.name}",
@@ -70,8 +76,10 @@ Future<void> main(List<String> args) async {
   print("Executing build command: ${buildCommand.join(' ')}");
 
   // Replace Process.run with Process.start to handle real-time output
-  final process =
-      await Process.start(buildCommand.first, buildCommand.sublist(1));
+  final process = await Process.start(
+    buildCommand.first,
+    buildCommand.sublist(1),
+  );
 
   process.stdout.transform(utf8.decoder).listen(print);
   process.stderr.transform(utf8.decoder).listen((data) {
@@ -115,24 +123,26 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
+  if (platform == "macos") {
+    print("macOS app built at ${buildDir.path}");
+    print(
+      "Sign, notarize, and staple this .app, then run "
+      "dart run desktop_updater:archive macos --app ${buildDir.path}",
+    );
+    return;
+  }
+
   final distPath = platform == "windows"
       ? path.join(
           "dist",
           buildNumber,
           "$appNamePubspec-$buildName+$buildNumber-$platform",
         )
-      : platform == "macos"
-          ? path.join(
-              "dist",
-              buildNumber,
-              "$appNamePubspec-$buildName+$buildNumber-$platform",
-              "$appNamePubspec.app",
-            )
-          : path.join(
-              "dist",
-              buildNumber,
-              "$appNamePubspec-$buildName+$buildNumber-$platform",
-            );
+      : path.join(
+          "dist",
+          buildNumber,
+          "$appNamePubspec-$buildName+$buildNumber-$platform",
+        );
 
   final distDir = Directory(distPath);
   if (distDir.existsSync()) {
@@ -143,20 +153,4 @@ Future<void> main(List<String> args) async {
   await copyDirectory(buildDir, Directory(distPath));
 
   print("Archive created at $distPath");
-}
-
-// Helper function to copy directories recursively
-Future<void> copyDirectory(Directory source, Directory destination) async {
-  if (!destination.existsSync()) {
-    destination.createSync(recursive: true);
-  }
-
-  await for (final entity in source.list(recursive: true)) {
-    if (entity is File) {
-      final relativePath = path.relative(entity.path, from: source.path);
-      final newPath = path.join(destination.path, relativePath);
-      await Directory(path.dirname(newPath)).create(recursive: true);
-      await entity.copy(newPath);
-    }
-  }
 }

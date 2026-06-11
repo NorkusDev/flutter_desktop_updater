@@ -2,84 +2,11 @@ import Cocoa
 import FlutterMacOS
 
 public class DesktopUpdaterPlugin: NSObject, FlutterPlugin {
-    func getCurrentVersion() -> String {
-        let infoDictionary = Bundle.main.infoDictionary!
-        let version = infoDictionary["CFBundleVersion"] as! String
-        return version
-    }
-    
-    func restartApp() {
-        let executablePath = Bundle.main.executablePath!
-        print("executablePath path: \(executablePath)")
-        
-        NSApplication.shared.terminate(nil)
-        
-        let updateFolder = Bundle.main.bundlePath + "/Contents/update"
-        do {
-            try copyAndReplaceFiles(from: updateFolder, to: Bundle.main.bundlePath + "/Contents")
-        } catch {
-            print("Error updating files: \(error)")
-            return
-        }
-        
-        do {
-            // Set execute permissions
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executablePath)
-            
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = []
-            try process.run()
-        } catch {
-            print("Error during restart: \(error)")
-        }
-
-        // Optionally, remove update folder after successful update
-        // try? FileManager.default.removeItem(atPath: updateFolder)
-    }
-    
-    func copyAndReplaceFiles(from sourcePath: String, to destinationPath: String) throws {
-        let fileManager = FileManager.default
-        let enumerator = fileManager.enumerator(atPath: sourcePath)
-        
-        while let element = enumerator?.nextObject() as? String {
-            let sourceItemPath = (sourcePath as NSString).appendingPathComponent(element)
-            let destinationItemPath = (destinationPath as NSString).appendingPathComponent(element)
-            
-            var isDir: ObjCBool = false
-            if fileManager.fileExists(atPath: sourceItemPath, isDirectory: &isDir) {
-                if isDir.boolValue {
-                    // Ensure the directory exists at destination
-                    if !fileManager.fileExists(atPath: destinationItemPath) {
-                        try fileManager.createDirectory(atPath: destinationItemPath, withIntermediateDirectories: true, attributes: nil)
-                    }
-                } else {
-                    // Handle file or symbolic link
-                    let attributes = try fileManager.attributesOfItem(atPath: sourceItemPath)
-                    if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
-                        // Handle symbolic link
-                        if fileManager.fileExists(atPath: destinationItemPath) {
-                            try fileManager.removeItem(atPath: destinationItemPath)
-                        }
-                        let target = try fileManager.destinationOfSymbolicLink(atPath: sourceItemPath)
-                        try fileManager.createSymbolicLink(atPath: destinationItemPath, withDestinationPath: target)
-                    } else {
-                        // Handle regular file
-                        if fileManager.fileExists(atPath: destinationItemPath) {
-                            // Replace existing file
-                            try fileManager.replaceItem(at: URL(fileURLWithPath: destinationItemPath), withItemAt: URL(fileURLWithPath: sourceItemPath), backupItemName: nil, options: [], resultingItemURL: nil)
-                        } else {
-                            // Copy new file
-                            try fileManager.copyItem(atPath: sourceItemPath, toPath: destinationItemPath)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "desktop_updater", binaryMessenger: registrar.messenger)
+        let channel = FlutterMethodChannel(
+            name: "desktop_updater",
+            binaryMessenger: registrar.messenger
+        )
         let instance = DesktopUpdaterPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
@@ -89,14 +16,166 @@ public class DesktopUpdaterPlugin: NSObject, FlutterPlugin {
         case "getPlatformVersion":
             result("macOS " + ProcessInfo.processInfo.operatingSystemVersionString)
         case "restartApp":
-            restartApp()
-            result(nil)
+            scheduleInstallAndRelaunch(stagingPath: nil, removedFiles: [], result: result)
+        case "installUpdate":
+            guard
+                let arguments = call.arguments as? [String: Any],
+                let stagingPath = arguments["stagingPath"] as? String,
+                !stagingPath.isEmpty
+            else {
+                result(
+                    FlutterError(
+                        code: "InvalidArguments",
+                        message: "installUpdate requires a stagingPath.",
+                        details: nil
+                    )
+                )
+                return
+            }
+
+            let removedFiles = arguments["removedFiles"] as? [String] ?? []
+            scheduleInstallAndRelaunch(
+                stagingPath: stagingPath,
+                removedFiles: removedFiles,
+                result: result
+            )
         case "getExecutablePath":
             result(Bundle.main.executablePath)
         case "getCurrentVersion":
-            result(getCurrentVersion())
+            result(Bundle.main.infoDictionary?["CFBundleVersion"] as? String)
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+
+    private func scheduleInstallAndRelaunch(
+        stagingPath: String?,
+        removedFiles _: [String],
+        result: @escaping FlutterResult
+    ) {
+        do {
+            if let stagingPath, !FileManager.default.fileExists(atPath: stagingPath) {
+                result(
+                    FlutterError(
+                        code: "InstallError",
+                        message: "Staged update directory does not exist.",
+                        details: stagingPath
+                    )
+                )
+                return
+            }
+
+            let scriptURL = try writeHelperScript(stagingPath: stagingPath)
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = [scriptURL.path]
+            try process.run()
+
+            result(nil)
+            DispatchQueue.main.async {
+                NSApplication.shared.terminate(nil)
+            }
+        } catch {
+            result(
+                FlutterError(
+                    code: "InstallError",
+                    message: "Unable to schedule update installation.",
+                    details: error.localizedDescription
+                )
+            )
+        }
+    }
+
+    private func writeHelperScript(stagingPath: String?) throws -> URL {
+        let bundlePath = Bundle.main.bundlePath
+        let helperName = "desktop_updater_\(UUID().uuidString).sh"
+        let scriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(helperName)
+
+        var script = """
+        #!/bin/sh
+        set -eu
+
+        PID="\(ProcessInfo.processInfo.processIdentifier)"
+        STAGING=\(shellQuote(stagingPath ?? ""))
+        BUNDLE=\(shellQuote(bundlePath))
+        SKIP_RELAUNCH="${DESKTOP_UPDATER_SMOKE_SKIP_RELAUNCH:-}"
+
+        while kill -0 "$PID" 2>/dev/null; do
+          sleep 0.5
+        done
+
+        """
+
+        script += """
+        if [ -n "$STAGING" ]; then
+          case "$STAGING" in
+            *.app) ;;
+            *)
+              echo "Staged macOS update must be a complete .app bundle." >&2
+              exit 1
+              ;;
+          esac
+
+          MANIFEST="$(dirname "$STAGING")/.desktop_updater_release_manifest.json"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "Staged update manifest is missing." >&2
+            exit 1
+          fi
+
+          EXPECTED_BUNDLE_ID="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$BUNDLE/Contents/Info.plist")"
+          EXPECTED_TEAM_ID="$(/usr/bin/codesign -dv --verbose=4 "$BUNDLE" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2; exit}')"
+          if [ -z "$EXPECTED_TEAM_ID" ]; then
+            echo "Installed app TeamIdentifier could not be read." >&2
+            exit 1
+          fi
+
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$STAGING"
+          /usr/sbin/spctl --assess --type execute --verbose=2 "$STAGING"
+          /usr/bin/xcrun stapler validate "$STAGING"
+
+          ACTUAL_BUNDLE_ID="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$STAGING/Contents/Info.plist")"
+          if [ "$ACTUAL_BUNDLE_ID" != "$EXPECTED_BUNDLE_ID" ]; then
+            echo "CFBundleIdentifier mismatch: expected $EXPECTED_BUNDLE_ID, got $ACTUAL_BUNDLE_ID" >&2
+            exit 1
+          fi
+
+          ACTUAL_TEAM_ID="$(/usr/bin/codesign -dv --verbose=4 "$STAGING" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2; exit}')"
+          if [ "$ACTUAL_TEAM_ID" != "$EXPECTED_TEAM_ID" ]; then
+            echo "TeamIdentifier mismatch: expected $EXPECTED_TEAM_ID, got $ACTUAL_TEAM_ID" >&2
+            exit 1
+          fi
+
+          TARGET_PARENT="$(dirname "$BUNDLE")"
+          TARGET_NAME="$(basename "$BUNDLE")"
+          BACKUP="$TARGET_PARENT/.$TARGET_NAME.desktop_updater_backup.$$"
+
+          /bin/mv "$BUNDLE" "$BACKUP"
+          if /bin/mv "$STAGING" "$BUNDLE"; then
+            /bin/rm -rf "$BACKUP"
+            /bin/rm -rf "$(dirname "$MANIFEST")"
+          else
+            /bin/mv "$BACKUP" "$BUNDLE"
+            exit 1
+          fi
+        fi
+
+        if [ "$SKIP_RELAUNCH" != "1" ]; then
+          open -n "$BUNDLE"
+        fi
+        rm -f "$0"
+        """
+
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: scriptURL.path
+        )
+        return scriptURL
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
