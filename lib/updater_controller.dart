@@ -136,6 +136,11 @@ class DesktopUpdaterController extends ChangeNotifier {
       manifestPath: _manifestPath,
     );
 
+    // Explicit flag — only set true when the stream completes without error.
+    // This prevents `_isDownloaded` from becoming true if the stream closes
+    // unexpectedly (e.g. the controller is closed before all files are done).
+    var downloadSucceeded = false;
+
     try {
       await for (final event in stream) {
         _updateProgress = event;
@@ -147,16 +152,20 @@ class DesktopUpdaterController extends ChangeNotifier {
         notifyListeners();
       }
 
-      _isDownloading = false;
-      _downloadProgress = 1.0;
-      _downloadedSize = _downloadSize;
-      _isDownloaded = true;
-      notifyListeners();
+      downloadSucceeded = true;
     } catch (_) {
       _isDownloading = false;
       _isDownloaded = false;
       notifyListeners();
       rethrow;
+    } finally {
+      if (downloadSucceeded) {
+        _isDownloading = false;
+        _downloadProgress = 1.0;
+        _downloadedSize = _downloadSize;
+        _isDownloaded = true;
+        notifyListeners();
+      }
     }
   }
 

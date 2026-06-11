@@ -79,10 +79,19 @@ Future<void> _downloadChangedFiles({
         stagingDirectory: stagingDirectory,
         onProgress: (receivedBytes, _) {
           currentFileBytes = receivedBytes;
+
+          // Cap reported bytes to (totalBytes - 1) so that fraction never
+          // reaches 1.0 inside onProgress — fraction hits 1.0 only after
+          // downloadFile() returns, meaning disk flush + hash verification
+          // have completed successfully.
+          final rawReceived = completedBytes + currentFileBytes;
+          final cappedReceived =
+              totalBytes > 0 ? rawReceived.clamp(0, totalBytes - 1) : rawReceived;
+
           controller.add(
             UpdateProgress(
               totalBytes: totalBytes.toDouble(),
-              receivedBytes: (completedBytes + currentFileBytes).toDouble(),
+              receivedBytes: cappedReceived.toDouble(),
               currentFile: fileHash.filePath,
               totalFiles: files.length,
               completedFiles: completedFiles,
@@ -92,9 +101,12 @@ Future<void> _downloadChangedFiles({
         },
       );
 
+      // Increment counters BEFORE emitting the final progress event so that
+      // completedFiles is always accurate when fraction first reaches 1.0.
       completedFiles += 1;
       completedBytes +=
           fileHash.length > 0 ? fileHash.length : currentFileBytes;
+
       controller.add(
         UpdateProgress(
           totalBytes: totalBytes.toDouble(),
