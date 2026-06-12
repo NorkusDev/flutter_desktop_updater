@@ -77,39 +77,48 @@ class DesktopUpdaterController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _isCheckingForUpdate = true;
+  bool get isCheckingForUpdate => _isCheckingForUpdate;
+
   Future<void> checkVersion() async {
     if (_appArchiveUrl == null) {
       throw Exception("App archive URL is not set");
     }
 
-    final versionResponse = await _plugin.versionCheck(
-      appArchiveUrl: appArchiveUrl.toString(),
-      skipHashes: skipHashes,
-    );
+    _isCheckingForUpdate = true;
+    notifyListeners();
 
-    if (versionResponse?.url != null) {
-      debugPrint("Found folder url: ${versionResponse?.url}");
+    try {
+      final versionResponse = await _plugin.versionCheck(
+        appArchiveUrl: appArchiveUrl.toString(),
+        skipHashes: skipHashes,
+      );
 
-      _needUpdate = true;
-      _folderUrl = versionResponse?.url;
-      _isMandatory = versionResponse?.mandatory ?? false;
+      if (versionResponse?.url != null) {
+        debugPrint("Found folder url: ${versionResponse?.url}");
 
-      // Calculate total length in bytes.
-      _downloadSize = (versionResponse?.changedFiles?.fold<double>(
-            0,
-            (previousValue, element) => previousValue + (element?.length ?? 0),
-          )) ??
-          0.0;
+        _needUpdate = true;
+        _folderUrl = versionResponse?.url;
+        _isMandatory = versionResponse?.mandatory ?? false;
 
-      _changedFiles = versionResponse?.changedFiles;
-      _removedFiles = versionResponse?.removedFiles ?? const [];
-      _manifestPath = versionResponse?.manifestPath ?? "release-manifest.json";
-      _releaseNotes = versionResponse?.changes;
-      _appName = versionResponse?.appName;
-      _appVersion = versionResponse?.version;
+        // Calculate total length in bytes.
+        _downloadSize = (versionResponse?.changedFiles?.fold<double>(
+              0,
+              (previousValue, element) => previousValue + (element?.length ?? 0),
+            )) ??
+            0.0;
 
-      debugPrint("Need update: $_needUpdate");
+        _changedFiles = versionResponse?.changedFiles;
+        _removedFiles = versionResponse?.removedFiles ?? const [];
+        _manifestPath = versionResponse?.manifestPath ?? "release-manifest.json";
+        _releaseNotes = versionResponse?.changes;
+        _appName = versionResponse?.appName;
+        _appVersion = versionResponse?.version;
 
+        debugPrint("Need update: $_needUpdate");
+      }
+    } finally {
+      _isCheckingForUpdate = false;
       notifyListeners();
     }
   }

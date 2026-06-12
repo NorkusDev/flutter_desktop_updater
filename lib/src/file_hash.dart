@@ -3,12 +3,11 @@ import "dart:convert";
 import "dart:io";
 
 import "package:cryptography_plus/cryptography_plus.dart";
-import "package:desktop_updater/src/app_paths.dart";
 import "package:desktop_updater/src/app_archive.dart";
+import "package:desktop_updater/src/app_paths.dart";
 import "package:desktop_updater/src/remote_file.dart";
-import "package:path/path.dart" as p;
-
 import "package:flutter/foundation.dart";
+import "package:path/path.dart" as p;
 
 class FileHashDiff {
   const FileHashDiff({required this.changedFiles, required this.removedFiles});

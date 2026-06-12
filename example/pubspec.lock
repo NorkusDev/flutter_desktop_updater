@@ -131,11 +131,9 @@ packages:
   fluent_ui:
     dependency: transitive
     description:
-      path: "."
-      ref: master
-      resolved-ref: b9d77c0333d8bf7ee86ed73f29dfd5a409d6fbbf
-      url: "https://github.com/NorkusDev/fluent_ui.git"
-    source: git
+      path: "../../fluent_ui"
+      relative: true
+    source: path
     version: "4.16.0"
   flutter:
     dependency: "direct main"

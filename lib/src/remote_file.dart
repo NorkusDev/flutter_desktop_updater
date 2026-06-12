@@ -5,7 +5,7 @@ import "package:http/http.dart" as http;
 import "package:path/path.dart" as path;
 
 String normalizeArchivePath(String filePath) {
-  final normalized = filePath.replaceAll("\\", "/");
+  final normalized = filePath.replaceAll(r"\", "/");
   final segments = normalized
       .split("/")
       .where((segment) => segment.isNotEmpty && segment != ".")

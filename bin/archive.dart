@@ -17,13 +17,13 @@ Future<String> getFileHash(File file) async {
     final hash = await Blake2b().hash(fileBytes);
     return base64.encode(hash.bytes);
   } catch (e) {
-    print("Error reading file ${file.path}: $e");
+    stdout.writeln("Error reading file ${file.path}: $e");
     return "";
   }
 }
 
 Future<String?> genFileHashes({required String? path}) async {
-  print("Generating file hashes for $path");
+  stdout.writeln("Generating file hashes for $path");
 
   if (path == null) {
     throw Exception("Desktop Updater: Executable path is null");
@@ -31,12 +31,12 @@ Future<String?> genFileHashes({required String? path}) async {
 
   final dir = Directory(path);
 
-  print("Directory path: ${dir.path}");
+  stdout.writeln("Directory path: ${dir.path}");
 
   if (await dir.exists()) {
     final outputFile = File("${dir.path}${Platform.pathSeparator}hashes.json");
     final sink = outputFile.openWrite();
-    var hashList = <FileHashModel>[];
+    final hashList = <FileHashModel>[];
 
     await for (final entity in dir.list(recursive: true, followLinks: false)) {
       if (entity is File &&
@@ -69,14 +69,14 @@ Future<String?> genFileHashes({required String? path}) async {
 
 Future<void> main(List<String> args) async {
   if (args.isEmpty) {
-    print("PLATFORM must be specified: macos, windows, linux");
+    stdout.writeln("PLATFORM must be specified: macos, windows, linux");
     exit(1);
   }
 
   final platform = args[0];
 
   if (platform != "macos" && platform != "windows" && platform != "linux") {
-    print("PLATFORM must be specified: macos, windows, linux");
+    stdout.writeln("PLATFORM must be specified: macos, windows, linux");
     exit(1);
   }
 
@@ -85,7 +85,7 @@ Future<void> main(List<String> args) async {
       "${parsed.version?.major}.${parsed.version?.minor}.${parsed.version?.patch}";
   final buildNumber = parsed.version?.build.firstOrNull.toString();
   if (buildNumber == null || buildNumber.isEmpty) {
-    print("pubspec.yaml version must include a build number.");
+    stdout.writeln("pubspec.yaml version must include a build number.");
     exit(1);
   }
   if (platform == "macos") {
@@ -106,8 +106,9 @@ Future<void> main(List<String> args) async {
       );
     final options = parser.parse(args.sublist(1));
     if (options.rest.length > 1) {
-      stderr.writeln("Unexpected arguments: ${options.rest.join(" ")}");
-      stderr.writeln(parser.usage);
+      stderr
+        ..writeln("Unexpected arguments: ${options.rest.join(" ")}")
+        ..writeln(parser.usage);
       exit(64);
     }
     final channel = options.rest.firstOrNull ?? (options["channel"] as String);
@@ -125,7 +126,7 @@ Future<void> main(List<String> args) async {
           ),
     );
     if (!await buildApp.exists()) {
-      print("macOS build app not found: ${buildApp.path}");
+      stdout.writeln("macOS build app not found: ${buildApp.path}");
       exit(1);
     }
 
@@ -141,12 +142,15 @@ Future<void> main(List<String> args) async {
       channel: channel,
     );
 
-    print("macOS release artifacts created at ${outputDirectory.path}");
-    print(
-      "Manifest: ${path.join(outputDirectory.path, "release-manifest.json")}",
-    );
-    print("Full archive: ${manifest.fullArchive?.path}");
-    print("Payload directory: ${path.join(outputDirectory.path, "payloads")}");
+    stdout
+      ..writeln("macOS release artifacts created at ${outputDirectory.path}")
+      ..writeln(
+        "Manifest: ${path.join(outputDirectory.path, "release-manifest.json")}",
+      )
+      ..writeln("Full archive: ${manifest.fullArchive?.path}")
+      ..writeln(
+        "Payload directory: ${path.join(outputDirectory.path, "payloads")}",
+      );
     return;
   }
 
@@ -154,7 +158,7 @@ Future<void> main(List<String> args) async {
   final distDir = Directory("dist");
 
   if (!await distDir.exists()) {
-    print("dist folder could not be found");
+    stdout.writeln("dist folder could not be found");
     exit(1);
   }
 
@@ -193,15 +197,15 @@ Future<void> main(List<String> args) async {
   }
 
   if (!platformFound || foundDirectory == null) {
-    print("File not found for platform: $platform");
+    stdout.writeln("File not found for platform: $platform");
     exit(1);
   } else {
-    print("Using archive: $foundDirectory");
+    stdout.writeln("Using archive: $foundDirectory");
   }
 
   /// Check if the file is a zip file
   // if (!foundDirectory.endsWith(".app")) {
-  //   print("File is not a zip file");
+  //   stdout.writeln("File is not a zip file");
   //   exit(1);
   // }
 

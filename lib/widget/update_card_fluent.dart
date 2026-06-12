@@ -259,7 +259,7 @@ class _UpdateCardFluentState extends State<UpdateCardFluent> {
       context: context,
       builder: (ctx) => ContentDialog(
         constraints: const BoxConstraints(maxWidth: 480),
-        title: const Text("Release notes"),
+        title: const Text("Release Notes", style: TextStyle(fontSize: 20)),
         content: SingleChildScrollView(
           child: Text(
             notifier?.releaseNotes?.map((e) => "• ${e?.message}").join("\n") ??

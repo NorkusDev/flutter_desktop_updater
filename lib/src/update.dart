@@ -36,6 +36,7 @@ Future<Stream<UpdateProgress>> updateAppFunction({
         ),
       );
     },
+    onCancel: () => controller.close(),
   );
 
   return controller.stream;
@@ -85,8 +86,9 @@ Future<void> _downloadChangedFiles({
           // downloadFile() returns, meaning disk flush + hash verification
           // have completed successfully.
           final rawReceived = completedBytes + currentFileBytes;
-          final cappedReceived =
-              totalBytes > 0 ? rawReceived.clamp(0, totalBytes - 1) : rawReceived;
+          final cappedReceived = totalBytes > 0
+              ? rawReceived.clamp(0, totalBytes - 1)
+              : rawReceived;
 
           controller.add(
             UpdateProgress(

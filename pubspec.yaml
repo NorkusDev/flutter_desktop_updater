@@ -3,6 +3,7 @@ description: "Flutter desktop updater plugin supporting Windows, macOS, and Linu
 version: 2.0.0-dev.2
 homepage: https://github.com/MarlonJD/flutter_desktop_updater
 repository: https://github.com/MarlonJD/flutter_desktop_updater
+publish_to: none
 
 platforms:
   macos:
@@ -27,11 +28,10 @@ dependencies:
   cryptography_flutter_plus: ^2.3.4
   cryptography_plus: ^2.7.1
   fluent_ui:
-    git:
-      url: https://github.com/NorkusDev/fluent_ui.git
-      ref: master
+    path: ../fluent_ui
   flutter:
     sdk: flutter
+
   http: ^1.2.2
   path: ^1.9.0
   plugin_platform_interface: ^2.0.2
