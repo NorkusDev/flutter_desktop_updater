@@ -119,11 +119,14 @@ Future<void> _downloadChangedFiles({
       );
     }
   } catch (error, stackTrace) {
-    controller.addError(error, stackTrace);
-  } finally {
+    // Only clean up staging dir on failure — on success the directory must
+    // remain on disk for the PowerShell installer script to copy after the
+    // app exits. The PS1 script deletes it once the copy is complete.
     if (await stagingDirectory.exists()) {
       await stagingDirectory.delete(recursive: true);
     }
+    controller.addError(error, stackTrace);
+  } finally {
     await controller.close();
   }
 }
