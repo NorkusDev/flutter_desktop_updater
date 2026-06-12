@@ -11,6 +11,8 @@ export "package:desktop_updater/src/localization.dart";
 export "package:desktop_updater/src/update_progress.dart";
 export "package:desktop_updater/widget/update_dialog.dart";
 export "package:desktop_updater/widget/update_direct_card.dart";
+export "package:desktop_updater/widget/update_direct_card_fluent.dart";
+export "package:desktop_updater/widget/update_card_fluent.dart";
 export "package:desktop_updater/widget/update_sliver.dart";
 
 export "desktop_updater_inherited_widget.dart";

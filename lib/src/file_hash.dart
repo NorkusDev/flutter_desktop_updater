@@ -8,6 +8,8 @@ import "package:desktop_updater/src/app_archive.dart";
 import "package:desktop_updater/src/remote_file.dart";
 import "package:path/path.dart" as p;
 
+import "package:flutter/foundation.dart";
+
 class FileHashDiff {
   const FileHashDiff({required this.changedFiles, required this.removedFiles});
 
@@ -21,7 +23,7 @@ Future<String> getFileHash(File file) async {
     final hash = await Blake2b().hash(fileBytes);
     return base64.encode(hash.bytes);
   } catch (e) {
-    print("Error reading file ${file.path}: $e");
+    debugPrint("Error reading file ${file.path}: $e");
     return "";
   }
 }
