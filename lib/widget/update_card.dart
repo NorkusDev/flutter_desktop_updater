@@ -234,8 +234,22 @@ class _UpdateCardState extends State<UpdateCard> {
                                             ),
                                           ),
                                           TextButton(
-                                            onPressed: () {
-                                              notifier?.restartApp();
+                                            onPressed: () async {
+                                              try {
+                                                await notifier?.restartApp();
+                                              } catch (e) {
+                                                if (context.mounted) {
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        "Gagal memulai ulang: $e",
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                              }
                                             },
                                             child: Text(
                                               notifier
