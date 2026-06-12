@@ -33,6 +33,9 @@ Future<List<FileHashModel?>> verifyFileHashes(
   return (await diffFileHashes(oldHashFilePath, newHashFilePath)).changedFiles;
 }
 
+/// Result of [genFileHashes]. Callers must delete [tempDir] when done.
+typedef GenFileHashesResult = ({String filePath, Directory tempDir});
+
 Future<FileHashDiff> diffFileHashes(
   String oldHashFilePath,
   String newHashFilePath,
@@ -86,7 +89,15 @@ Future<FileHashDiff> diffFileHashes(
   return FileHashDiff(changedFiles: changedFiles, removedFiles: removedFiles);
 }
 
-Future<String> genFileHashes({String? path, List<String>? skipHashes}) async {
+/// Generates a `hashes.json` for the current installation and returns both
+/// the file path and the [Directory] that owns it.
+///
+/// **Callers are responsible for deleting [GenFileHashesResult.tempDir]** once
+/// the hash file is no longer needed (typically in a `finally` block).
+Future<GenFileHashesResult> genFileHashes({
+  String? path,
+  List<String>? skipHashes,
+}) async {
   final dir = hashRootDirectory(pathValue: path);
 
   if (await dir.exists()) {
@@ -122,7 +133,7 @@ Future<String> genFileHashes({String? path, List<String>? skipHashes}) async {
     hashList.sort((a, b) => a.filePath.compareTo(b.filePath));
     sink.write(const JsonEncoder.withIndent("  ").convert(hashList));
     await sink.close();
-    return outputFile.path;
+    return (filePath: outputFile.path, tempDir: tempDir);
   } else {
     throw Exception("Desktop Updater: Directory does not exist");
   }

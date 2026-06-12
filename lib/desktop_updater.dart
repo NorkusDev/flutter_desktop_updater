@@ -54,8 +54,17 @@ class DesktopUpdater {
     return verifyFileHashes(oldHashFilePath, newHashFilePath);
   }
 
-  Future<String?> generateFileHashes({String? path, List<String>? skipHashes}) {
-    return genFileHashes(path: path, skipHashes: skipHashes);
+  Future<String?> generateFileHashes({
+    String? path,
+    List<String>? skipHashes,
+  }) async {
+    final result = await genFileHashes(path: path, skipHashes: skipHashes);
+    // Immediately clean up the temp directory — the caller only needs the path
+    // value and cannot perform cleanup themselves.
+    if (await result.tempDir.exists()) {
+      await result.tempDir.delete(recursive: true);
+    }
+    return result.filePath;
   }
 
   Future<Stream<UpdateProgress>> updateApp({

@@ -13,6 +13,7 @@ Future<ItemModel?> versionCheckFunction({
   List<String>? skipHashes,
 }) async {
   final tempDir = await Directory.systemTemp.createTemp("desktop_updater_");
+  Directory? oldHashTempDir;
 
   try {
     final appArchiveFile = File(path.join(tempDir.path, "app-archive.json"));
@@ -56,8 +57,9 @@ Future<ItemModel?> versionCheckFunction({
       destination: newHashFile,
     );
 
-    final oldHashFilePath = await genFileHashes(skipHashes: skipHashes);
-    final diff = await diffFileHashes(oldHashFilePath, newHashFile.path);
+    final oldHashResult = await genFileHashes(skipHashes: skipHashes);
+    oldHashTempDir = oldHashResult.tempDir;
+    final diff = await diffFileHashes(oldHashResult.filePath, newHashFile.path);
 
     if (diff.changedFiles.isEmpty && diff.removedFiles.isEmpty) {
       return null;
@@ -71,6 +73,9 @@ Future<ItemModel?> versionCheckFunction({
   } finally {
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
+    }
+    if (oldHashTempDir != null && await oldHashTempDir.exists()) {
+      await oldHashTempDir.delete(recursive: true);
     }
   }
 }

@@ -119,11 +119,11 @@ Future<void> _downloadChangedFiles({
       );
     }
   } catch (error, stackTrace) {
+    controller.addError(error, stackTrace);
+  } finally {
     if (await stagingDirectory.exists()) {
       await stagingDirectory.delete(recursive: true);
     }
-    controller.addError(error, stackTrace);
-  } finally {
     await controller.close();
   }
 }

@@ -11,6 +11,7 @@ Future<List<FileHashModel?>> prepareUpdateAppFunction({
   List<String>? skipHashes,
 }) async {
   final tempDir = await Directory.systemTemp.createTemp("desktop_updater_");
+  Directory? oldHashTempDir;
 
   try {
     if (Platform.isMacOS) {
@@ -29,11 +30,15 @@ Future<List<FileHashModel?>> prepareUpdateAppFunction({
       destination: newHashFile,
     );
 
-    final oldHashFilePath = await genFileHashes(skipHashes: skipHashes);
-    return await verifyFileHashes(oldHashFilePath, newHashFile.path);
+    final oldHashResult = await genFileHashes(skipHashes: skipHashes);
+    oldHashTempDir = oldHashResult.tempDir;
+    return await verifyFileHashes(oldHashResult.filePath, newHashFile.path);
   } finally {
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
+    }
+    if (oldHashTempDir != null && await oldHashTempDir.exists()) {
+      await oldHashTempDir.delete(recursive: true);
     }
   }
 }
