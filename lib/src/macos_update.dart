@@ -115,9 +115,9 @@ Future<Stream<UpdateProgress>> updateMacOSAppFunction({
         ),
       );
     },
-    onCancel: () async {
-      await controller.close();
-    },
+    // onCancel: () async {
+    //   await controller.close();
+    // },
   );
 
   return controller.stream;

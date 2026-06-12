@@ -1,5 +1,6 @@
 import "dart:convert";
 import "dart:io";
+import "dart:isolate";
 
 import "package:desktop_updater/desktop_updater.dart";
 import "package:desktop_updater/src/file_hash.dart";
@@ -57,7 +58,8 @@ Future<ItemModel?> versionCheckFunction({
       destination: newHashFile,
     );
 
-    final oldHashResult = await genFileHashes(skipHashes: skipHashes);
+    // Run hashing in an isolate to prevent blocking the UI thread (fixes long Shimmer delay/freeze)
+    final oldHashResult = await Isolate.run(() => genFileHashes(skipHashes: skipHashes));
     oldHashTempDir = oldHashResult.tempDir;
     final diff = await diffFileHashes(oldHashResult.filePath, newHashFile.path);
 

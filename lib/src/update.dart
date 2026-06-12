@@ -36,7 +36,7 @@ Future<Stream<UpdateProgress>> updateAppFunction({
         ),
       );
     },
-    onCancel: () => controller.close(),
+    // onCancel: () => controller.close(),
   );
 
   return controller.stream;

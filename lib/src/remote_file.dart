@@ -126,7 +126,7 @@ Future<void> _downloadHttpUri(
 
   try {
     final request = http.Request("GET", uri);
-    final response = await client.send(request);
+    final response = await client.send(request).timeout(const Duration(seconds: 30));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HttpException(
@@ -136,7 +136,7 @@ Future<void> _downloadHttpUri(
     }
 
     await _writeStream(
-      response.stream,
+      response.stream.timeout(const Duration(seconds: 15)),
       destination,
       totalBytes: response.contentLength,
       onProgress: onProgress,

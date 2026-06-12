@@ -132,6 +132,8 @@ class DesktopUpdaterController extends ChangeNotifier {
       throw Exception("Changed files are not set");
     }
 
+    if (_isDownloading) return;
+
     _isDownloading = true;
     _isDownloaded = false;
     _downloadProgress = 0;
