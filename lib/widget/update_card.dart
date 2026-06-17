@@ -8,6 +8,7 @@ import "package:desktop_updater/updater_controller.dart";
 import "package:desktop_updater/widget/update_problem_report_dialog.dart";
 import "package:flutter/foundation.dart";
 import "package:flutter/material.dart";
+import "package:shimmer/shimmer.dart";
 
 /// A ready-made Material card for the desktop update flow.
 class UpdateCard extends StatelessWidget {
@@ -31,13 +32,33 @@ class UpdateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final notifier = controller ??
         DesktopUpdaterInheritedNotifier.maybeOf(context)?.notifier;
-    if (notifier == null || !_shouldShowReadyUi(notifier)) {
+    if (notifier == null) {
+      return const SizedBox.shrink();
+    }
+    if (!_shouldShowReadyUi(notifier) && notifier.state is! UpdateChecking) {
       return const SizedBox.shrink();
     }
 
     return ListenableBuilder(
       listenable: notifier,
       builder: (context, child) {
+        if (notifier.state is UpdateChecking) {
+          return Padding(
+            padding: margin,
+            child: Shimmer.fromColors(
+              baseColor: Colors.grey.shade300,
+              highlightColor: Colors.grey.shade100,
+              child: Card(
+                child: Container(
+                  height: 120,
+                  width: double.infinity,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          );
+        }
+
         if (!_shouldShowReadyUi(notifier)) {
           return const SizedBox.shrink();
         }
@@ -407,7 +428,18 @@ void _showRestartDialog(
             ),
           ),
           TextButton(
-            onPressed: notifier.restartApp,
+            onPressed: () async {
+              Navigator.of(context).pop();
+              try {
+                await notifier.restartApp();
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Restart failed: $e")),
+                  );
+                }
+              }
+            },
             child: Text(
               notifier.getLocalization?.warningConfirmText ?? "Restart",
             ),

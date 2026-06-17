@@ -456,7 +456,18 @@ class UpdateDialogWidget extends StatelessWidget {
                                     ),
                                   ),
                                   TextButton(
-                                    onPressed: notifier.restartApp,
+                                    onPressed: () async {
+                                      Navigator.of(context).pop();
+                                      try {
+                                        await notifier.restartApp();
+                                      } catch (e) {
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text("Restart failed: $e")),
+                                          );
+                                        }
+                                      }
+                                    },
                                     child: Text(
                                       notifier.getLocalization
                                               ?.warningConfirmText ??

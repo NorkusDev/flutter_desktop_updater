@@ -25,6 +25,7 @@ dependencies:
   args: ^2.6.0
   crypto: ^3.0.7
   cryptography_plus: ^2.7.1
+  fluent_ui: ^4.11.3
   flutter:
     sdk: flutter
   http: ^1.2.2
@@ -32,6 +33,7 @@ dependencies:
   plugin_platform_interface: ^2.0.2
   pub_semver: ^2.1.5
   pubspec_parse: ^1.5.0
+  shimmer: ^3.0.0
   yaml: ^3.1.2
 
 dev_dependencies:
