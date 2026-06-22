@@ -61,6 +61,9 @@ class DesktopUpdater {
     /// Legacy-compatible list of files removed during install.
     List<String> removedFiles = const [],
 
+    /// Files that should NOT be deleted during wholeDirectoryReplace install.
+    List<String> preservedFiles = const [],
+
     /// Allows unsigned macOS update artifacts for explicitly trusted lanes.
     bool allowUnsignedMacOSUpdates = false,
 
@@ -70,6 +73,7 @@ class DesktopUpdater {
     return DesktopUpdaterPlatform.instance.installUpdate(
       stagingPath: stagingPath,
       removedFiles: removedFiles,
+      preservedFiles: preservedFiles,
       allowUnsignedMacOSUpdates: allowUnsignedMacOSUpdates,
       diagnosticsLogPath: diagnosticsLogPath,
     );

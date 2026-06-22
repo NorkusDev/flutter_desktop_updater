@@ -25,12 +25,14 @@ class MethodChannelDesktopUpdater extends DesktopUpdaterPlatform {
   Future<void> installUpdate({
     required String stagingPath,
     List<String> removedFiles = const [],
+    List<String> preservedFiles = const [],
     bool allowUnsignedMacOSUpdates = false,
     String? diagnosticsLogPath,
   }) async {
     final arguments = <String, Object?>{
       "stagingPath": stagingPath,
       "removedFiles": removedFiles,
+      "preservedFiles": preservedFiles,
       "allowUnsignedMacOSUpdates": allowUnsignedMacOSUpdates,
     };
     if (diagnosticsLogPath != null && diagnosticsLogPath.isNotEmpty) {

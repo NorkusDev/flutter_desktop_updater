@@ -45,6 +45,7 @@ class DesktopUpdaterController extends ChangeNotifier {
     this.diagnosticsLogPath,
     this.telemetry,
     this.isMinimumOSSupported,
+    this.preservedFiles = const [],
     UpdateDiagnosticsRecorder? diagnosticsRecorder,
     Future<void> Function(UpdateProblemReport report)? onProblemReport,
     FutureOr<void> Function(UpdateCleanupReport report)? onCleanupReport,
@@ -111,6 +112,9 @@ class DesktopUpdaterController extends ChangeNotifier {
   /// Keep this false for public macOS distribution. When true, macOS still
   /// requires a complete `.app` bundle with the same bundle identifier.
   final bool allowUnsignedMacOSUpdates;
+
+  /// List of files that should NOT be deleted during wholeDirectoryReplace install.
+  final List<String> preservedFiles;
 
   Uri? _appArchiveUrl;
 
@@ -459,6 +463,7 @@ class DesktopUpdaterController extends ChangeNotifier {
       await _writePendingRecoveryMarker(stagingPath);
       await DesktopUpdaterPlatform.instance.installUpdate(
         stagingPath: stagingPath,
+        preservedFiles: preservedFiles,
         allowUnsignedMacOSUpdates: allowUnsignedMacOSUpdates,
         diagnosticsLogPath: diagnosticsLogPath,
       );

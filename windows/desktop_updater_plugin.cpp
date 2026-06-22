@@ -138,6 +138,7 @@ bool StartDetachedPowerShell(const fs::path& script_path) {
 
 bool ScheduleInstallAndRelaunch(const std::wstring& staging_path,
                                 const std::vector<std::wstring>& removed_files,
+                                const std::vector<std::wstring>& preserved_files,
                                 const std::wstring& diagnostics_log_path,
                                 std::string* error) {
   const std::wstring executable_path = CurrentExecutablePath();
@@ -165,6 +166,7 @@ bool ScheduleInstallAndRelaunch(const std::wstring& staging_path,
       << "$exe = " << PowerShellQuote(executable_path) << "\n"
       << "$diagnosticsLog = " << PowerShellQuote(diagnostics_log_path) << "\n"
       << "$removed = " << PowerShellArray(removed_files) << "\n"
+      << "$preserved = " << PowerShellArray(preserved_files) << "\n"
       << "$skipRelaunch = $env:DESKTOP_UPDATER_SMOKE_SKIP_RELAUNCH\n"
       << "function Write-DiagnosticsEvent([string]$Event) {\n"
       << "  if ([string]::IsNullOrWhiteSpace($diagnosticsLog)) { return }\n"
@@ -271,6 +273,17 @@ bool ScheduleInstallAndRelaunch(const std::wstring& staging_path,
       << "      }\n"
       << "      $targetManifest = Join-Path $target '.desktop_updater_release_manifest.json'\n"
       << "      Remove-Item -LiteralPath $targetManifest -Force -ErrorAction SilentlyContinue\n"
+      << "      foreach ($relative in $preserved) {\n"
+      << "        if ([string]::IsNullOrWhiteSpace($relative)) { continue }\n"
+      << "        $src = [IO.Path]::GetFullPath((Join-Path $backup $relative))\n"
+      << "        if (-not $src.StartsWith(([IO.Path]::GetFullPath($backup) + '\\'), [StringComparison]::OrdinalIgnoreCase)) { continue }\n"
+      << "        if (-not (Test-Path -LiteralPath $src)) { continue }\n"
+      << "        $dst = [IO.Path]::GetFullPath((Join-Path $target $relative))\n"
+      << "        if (-not $dst.StartsWith($targetRootWithSlash, [StringComparison]::OrdinalIgnoreCase)) { continue }\n"
+      << "        $dstDir = [IO.Path]::GetDirectoryName($dst)\n"
+      << "        if (-not (Test-Path -LiteralPath $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }\n"
+      << "        Copy-Item -LiteralPath $src -Destination $dst -Force\n"
+      << "      }\n"
       << "      Write-DiagnosticsEvent 'move success'\n"
       << "      break\n"
       << "    } catch {\n"
@@ -395,6 +408,29 @@ std::vector<std::wstring> RemovedFilesFromArguments(
   return removed_files;
 }
 
+std::vector<std::wstring> PreservedFilesFromArguments(
+    const flutter::EncodableMap& arguments) {
+  std::vector<std::wstring> preserved_files;
+  const auto iterator =
+      arguments.find(flutter::EncodableValue("preservedFiles"));
+  if (iterator == arguments.end()) {
+    return preserved_files;
+  }
+
+  const auto* list = std::get_if<flutter::EncodableList>(&iterator->second);
+  if (list == nullptr) {
+    return preserved_files;
+  }
+
+  for (const auto& value : *list) {
+    if (const auto* item = std::get_if<std::string>(&value)) {
+      preserved_files.push_back(Utf8ToWide(*item));
+    }
+  }
+
+  return preserved_files;
+}
+
 std::wstring DiagnosticsLogPathFromArguments(
     const flutter::EncodableMap& arguments) {
   const auto iterator =
@@ -495,7 +531,7 @@ void DesktopUpdaterPlugin::HandleMethodCall(
     result->Success(flutter::EncodableValue(version_stream.str()));
   } else if (method_call.method_name().compare("restartApp") == 0) {
     std::string error;
-    if (!ScheduleInstallAndRelaunch(L"", {}, L"", &error)) {
+    if (!ScheduleInstallAndRelaunch(L"", {}, {}, L"", &error)) {
       result->Error("RestartError", error);
       return;
     }
@@ -526,6 +562,7 @@ void DesktopUpdaterPlugin::HandleMethodCall(
     std::string error;
     if (!ScheduleInstallAndRelaunch(
             Utf8ToWide(*staging_path), RemovedFilesFromArguments(*arguments),
+            PreservedFilesFromArguments(*arguments),
             DiagnosticsLogPathFromArguments(*arguments), &error)) {
       result->Error("InstallError", error);
       return;

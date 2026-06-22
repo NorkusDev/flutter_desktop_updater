@@ -5,6 +5,7 @@ import "package:desktop_updater/src/core/release_descriptor.dart";
 import "package:desktop_updater/src/core/update_state.dart";
 import "package:desktop_updater/src/localization.dart";
 import "package:desktop_updater/updater_controller.dart";
+import "package:desktop_updater/widget/update_problem_report_dialog_fluent.dart";
 import "package:fluent_ui/fluent_ui.dart";
 import "package:shimmer/shimmer.dart";
 
@@ -44,8 +45,8 @@ class UpdateCardFluent extends StatelessWidget {
           return Padding(
             padding: margin,
             child: Shimmer.fromColors(
-              baseColor: Colors.grey[300]!,
-              highlightColor: Colors.grey[100]!,
+              baseColor: const Color(0xFFE0E0E0),
+              highlightColor: const Color(0xFFF5F5F5),
               child: Card(
                 child: Container(
                   height: 120,
@@ -92,12 +93,12 @@ class _ExpandedUpdateCardFluent extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: theme.accentColor.resolveFrom(context).withOpacity(0.1),
+                  color: theme.accentColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
                   FluentIcons.refresh,
-                  color: theme.accentColor.resolveFrom(context),
+                  color: theme.accentColor,
                   size: 24,
                 ),
               ),
@@ -157,7 +158,7 @@ class _ExpandedUpdateCardFluent extends StatelessWidget {
                 Icon(
                   FluentIcons.error,
                   color: Colors.red,
-                )
+                ),
             ],
           ),
         ],
@@ -217,6 +218,26 @@ class _UpdateCardActionsFluent extends StatelessWidget {
                 ],
               ),
             ),
+            if (report != null) ...[
+              const SizedBox(width: 8),
+              Button(
+                onPressed: () {
+                  showUpdateProblemReportDialogFluent(
+                    context,
+                    controller: notifier,
+                    report: report,
+                  );
+                },
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(FluentIcons.report_document, size: 14),
+                    SizedBox(width: 8),
+                    Text("View report"),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       _ => Row(
