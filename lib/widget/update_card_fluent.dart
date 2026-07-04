@@ -7,6 +7,8 @@ import "package:desktop_updater/src/localization.dart";
 import "package:desktop_updater/updater_controller.dart";
 import "package:desktop_updater/widget/update_problem_report_dialog_fluent.dart";
 import "package:fluent_ui/fluent_ui.dart";
+import "package:flutter/foundation.dart";
+import "package:flutter/services.dart";
 import "package:shimmer/shimmer.dart";
 
 /// A ready-made Fluent UI card for the desktop update flow.
@@ -69,6 +71,19 @@ class UpdateCardFluent extends StatelessWidget {
       },
     );
   }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties
+      ..add(
+        DiagnosticsProperty<DesktopUpdaterController?>(
+          "controller",
+          controller,
+        ),
+      )
+      ..add(DiagnosticsProperty<EdgeInsetsGeometry>("margin", margin));
+  }
 }
 
 class _ExpandedUpdateCardFluent extends StatelessWidget {
@@ -93,7 +108,7 @@ class _ExpandedUpdateCardFluent extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: theme.accentColor.withOpacity(0.1),
+                  color: theme.accentColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
@@ -163,6 +178,14 @@ class _ExpandedUpdateCardFluent extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties.add(
+      DiagnosticsProperty<DesktopUpdaterController>("notifier", notifier),
     );
   }
 }
@@ -276,6 +299,14 @@ class _UpdateCardActionsFluent extends StatelessWidget {
         ),
     };
   }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties.add(
+      DiagnosticsProperty<DesktopUpdaterController>("notifier", notifier),
+    );
+  }
 }
 
 bool _shouldShowReadyUi(DesktopUpdaterController controller) {
@@ -384,7 +415,7 @@ void _showRestartDialog(
             Navigator.of(ctx).pop();
             try {
               await notifier.restartApp();
-            } catch (e) {
+            } on Object catch (e) {
               if (ctx.mounted) {
                 await displayInfoBar(
                   ctx,

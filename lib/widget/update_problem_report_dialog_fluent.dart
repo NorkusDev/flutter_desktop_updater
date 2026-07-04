@@ -2,6 +2,7 @@ import "dart:async";
 
 import "package:desktop_updater/updater_controller.dart";
 import "package:fluent_ui/fluent_ui.dart";
+import "package:flutter/foundation.dart";
 import "package:flutter/services.dart";
 
 /// Shows a Fluent UI problem report dialog for a failed update.
@@ -105,6 +106,16 @@ class UpdateProblemReportDialogFluent extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties
+      ..add(
+        DiagnosticsProperty<DesktopUpdaterController>("controller", controller),
+      )
+      ..add(DiagnosticsProperty<UpdateProblemReport>("report", report));
   }
 }
 

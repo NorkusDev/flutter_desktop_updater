@@ -3,6 +3,7 @@ import "dart:async";
 import "package:desktop_updater/desktop_updater.dart";
 import "package:desktop_updater/updater_controller.dart";
 import "package:fluent_ui/fluent_ui.dart";
+import "package:flutter/foundation.dart";
 
 /// Listens for available updates and presents them in a Fluent UI ContentDialog.
 class UpdateDialogListenerFluent extends StatefulWidget {
@@ -16,10 +17,23 @@ class UpdateDialogListenerFluent extends StatefulWidget {
   final DesktopUpdaterController controller;
 
   @override
-  State<UpdateDialogListenerFluent> createState() => _UpdateDialogListenerFluentState();
+  State<UpdateDialogListenerFluent> createState() =>
+      _UpdateDialogListenerFluentState();
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties.add(
+      DiagnosticsProperty<DesktopUpdaterController>(
+        "controller",
+        controller,
+      ),
+    );
+  }
 }
 
-class _UpdateDialogListenerFluentState extends State<UpdateDialogListenerFluent> {
+class _UpdateDialogListenerFluentState
+    extends State<UpdateDialogListenerFluent> {
   Object? _dialogRequest;
 
   @override
@@ -139,17 +153,28 @@ class UpdateDialogWidgetFluent extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    getLocalizedString(notifier.getLocalization?.newVersionAvailableText, [notifier.appName, notifier.appVersion]) ?? 
-                    getLocalizedString("{} {} is available", [notifier.appName, notifier.appVersion]) ?? "",
+                    getLocalizedString(
+                          notifier.getLocalization?.newVersionAvailableText,
+                          [notifier.appName, notifier.appVersion],
+                        ) ??
+                        getLocalizedString(
+                          "{} {} is available",
+                          [notifier.appName, notifier.appVersion],
+                        ) ??
+                        "",
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    getLocalizedString(notifier.getLocalization?.newVersionLongText, [
-                      _formatMegabytes(totalBytes),
-                    ]) ?? 
-                    getLocalizedString("New version is ready to download. This will download {} MB of data.", [
-                      _formatMegabytes(totalBytes),
-                    ]) ?? "",
+                    getLocalizedString(
+                            notifier.getLocalization?.newVersionLongText, [
+                          _formatMegabytes(totalBytes),
+                        ]) ??
+                        getLocalizedString(
+                            "New version is ready to download. This will download {} MB of data.",
+                            [
+                              _formatMegabytes(totalBytes),
+                            ]) ??
+                        "",
                   ),
                   if (state is UpdateDownloading) ...[
                     const SizedBox(height: 16),
@@ -188,7 +213,8 @@ class UpdateDialogWidgetFluent extends StatelessWidget {
               builder: (context) {
                 return ContentDialog(
                   title: Text(
-                    notifier.getLocalization?.warningTitleText ?? "Are you sure?",
+                    notifier.getLocalization?.warningTitleText ??
+                        "Are you sure?",
                   ),
                   content: Text(
                     notifier.getLocalization?.restartWarningText ??
@@ -198,7 +224,8 @@ class UpdateDialogWidgetFluent extends StatelessWidget {
                     Button(
                       onPressed: () => Navigator.of(context).pop(),
                       child: Text(
-                        notifier.getLocalization?.warningCancelText ?? "Not now",
+                        notifier.getLocalization?.warningCancelText ??
+                            "Not now",
                       ),
                     ),
                     FilledButton(
@@ -206,7 +233,7 @@ class UpdateDialogWidgetFluent extends StatelessWidget {
                         Navigator.of(context).pop();
                         try {
                           await notifier.restartApp();
-                        } catch (e) {
+                        } on Object catch (e) {
                           if (context.mounted) {
                             await displayInfoBar(
                               context,
@@ -221,7 +248,8 @@ class UpdateDialogWidgetFluent extends StatelessWidget {
                         }
                       },
                       child: Text(
-                        notifier.getLocalization?.warningConfirmText ?? "Restart",
+                        notifier.getLocalization?.warningConfirmText ??
+                            "Restart",
                       ),
                     ),
                   ],
@@ -242,7 +270,8 @@ class UpdateDialogWidgetFluent extends StatelessWidget {
               unawaited(notifier.makeSkipUpdate());
             },
             child: Text(
-              notifier.getLocalization?.skipThisVersionText ?? "Skip this version",
+              notifier.getLocalization?.skipThisVersionText ??
+                  "Skip this version",
             ),
           ),
         FilledButton(
@@ -251,6 +280,14 @@ class UpdateDialogWidgetFluent extends StatelessWidget {
         ),
       ];
     }
+  }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties.add(
+      DiagnosticsProperty<DesktopUpdaterController>("notifier", notifier),
+    );
   }
 }
 

@@ -77,7 +77,7 @@ class DesktopUpdaterController extends ChangeNotifier {
   /// Creates a controller with injected collaborators for unit testing.
   ///
   /// Identical to the default constructor but accepts an optional
-  /// [releaseNotesFetcher] so tests can substitute a fake HTTP layer without
+  /// [releaseNotesLoader] so tests can substitute a fake HTTP layer without
   /// exposing that seam in the public API.
   @visibleForTesting
   DesktopUpdaterController.forTesting({
@@ -91,13 +91,13 @@ class DesktopUpdaterController extends ChangeNotifier {
     this.diagnosticsLogPath,
     this.telemetry,
     this.isMinimumOSSupported,
+    this.preservedFiles = const [],
     UpdateDiagnosticsRecorder? diagnosticsRecorder,
     Future<void> Function(UpdateProblemReport report)? onProblemReport,
     FutureOr<void> Function(UpdateCleanupReport report)? onCleanupReport,
     bool skipInitialVersionCheck = false,
     ReleaseNotesLoader? releaseNotesLoader,
     Uri? releaseNotesUrl,
-    ReleaseNotesFetcher? releaseNotesFetcher,
   })  : _skipInitialVersionCheck = skipInitialVersionCheck,
         _diagnosticsRecorder =
             diagnosticsRecorder ?? UpdateDiagnosticsRecorder(channel: channel),
@@ -105,8 +105,8 @@ class DesktopUpdaterController extends ChangeNotifier {
         _onCleanupReport = onCleanupReport,
         _releaseNotesLoader = releaseNotesLoader,
         _releaseNotesUrl = releaseNotesUrl,
-        _releaseNotesFetcher = releaseNotesFetcher ??
-            (releaseNotesUrl == null ? null : ReleaseNotesFetcher()) {
+        _releaseNotesFetcher =
+            releaseNotesUrl == null ? null : ReleaseNotesFetcher() {
     if (appArchiveUrl != null) {
       init(appArchiveUrl);
     }

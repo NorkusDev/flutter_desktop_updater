@@ -136,6 +136,37 @@ updates:
     }
   });
 
+  test("publish accepts repeated dart define options", () async {
+    final fixture = await createReleasePublishFixture(
+      config: """
+updates:
+  baseUrl: https://updates.example.com
+""",
+    );
+    try {
+      final output = StringBuffer();
+
+      final exitCode = await runReleaseCommand(
+        [
+          "publish",
+          "--platform",
+          fixture.platform,
+          "--dart-define",
+          "MY_VAR=value",
+          "--dart-define=FEATURE_FLAG=true",
+          "--skip-build-for-test",
+        ],
+        projectRoot: fixture.root,
+        output: output,
+      );
+
+      expect(exitCode, 0);
+      expect(output.toString(), contains("Manual publish package is ready."));
+    } finally {
+      await fixture.delete();
+    }
+  });
+
   test("notarize flag is only accepted for macOS", () async {
     final fixture = await createReleasePublishFixture(
       config: """

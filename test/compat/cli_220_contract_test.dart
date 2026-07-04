@@ -29,6 +29,6 @@ void main() {
 
     expect(badOptionCode, 64);
     expect(
-        badOptionOutput.toString(), contains("definitely-not-a-real-option"));
+        badOptionOutput.toString(), contains("definitely-not-a-real-option"),);
   });
 }

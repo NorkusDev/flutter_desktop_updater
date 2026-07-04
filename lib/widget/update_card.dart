@@ -452,7 +452,7 @@ void _showRestartDialog(
               Navigator.of(context).pop();
               try {
                 await notifier.restartApp();
-              } catch (e) {
+              } on Object catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text("Restart failed: $e")),
