@@ -101,7 +101,7 @@ class _CompactUpdateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Card.filled(
+    final card = Card.filled(
       margin: margin,
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -137,6 +137,8 @@ class _CompactUpdateCard extends StatelessWidget {
         ),
       ),
     );
+
+    return _withLocalizationDirection(notifier, card);
   }
 
   @override
@@ -164,7 +166,7 @@ class _ExpandedUpdateCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final state = notifier.state;
 
-    return Card.filled(
+    final card = Card.filled(
       margin: margin,
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -245,6 +247,8 @@ class _ExpandedUpdateCard extends StatelessWidget {
         ),
       ),
     );
+
+    return _withLocalizationDirection(notifier, card);
   }
 
   @override
@@ -283,6 +287,30 @@ class _UpdateCardActions extends StatelessWidget {
             notifier.getLocalization?.restartText ?? "Restart to update",
           ),
           onPressed: () => _showRestartDialog(context, notifier),
+        ),
+      UpdateFreshInstallRequired() => Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              icon: const Icon(Icons.open_in_new),
+              label: Text(
+                notifier.getLocalization?.downloadLatestText ??
+                    "Download latest",
+              ),
+              onPressed: notifier.openFreshInstallDownload,
+            ),
+            if (!_isMandatoryUpdate(state))
+              OutlinedButton.icon(
+                icon: const Icon(Icons.close),
+                label: Text(
+                  notifier.getLocalization?.warningCancelText ?? "Not now",
+                ),
+                onPressed: () {
+                  unawaited(notifier.makeSkipUpdate());
+                },
+              ),
+          ],
         ),
       UpdateFailed(:final report) => Wrap(
           spacing: 8,
@@ -341,6 +369,17 @@ class _UpdateCardActions extends StatelessWidget {
   }
 }
 
+Widget _withLocalizationDirection(
+  DesktopUpdaterController notifier,
+  Widget child,
+) {
+  final textDirection = notifier.getLocalization?.textDirection;
+  if (textDirection == null) {
+    return child;
+  }
+  return Directionality(textDirection: textDirection, child: child);
+}
+
 bool _shouldShowReadyUi(DesktopUpdaterController controller) {
   if (controller.skipUpdate) {
     return false;
@@ -348,6 +387,8 @@ bool _shouldShowReadyUi(DesktopUpdaterController controller) {
 
   return switch (controller.state) {
     UpdateAvailable() ||
+    UpdateFreshInstallRequired() ||
+    UpdateBlockedBySupportPolicy() ||
     UpdateDownloading() ||
     UpdateReadyToInstall() ||
     UpdateFailed() =>
@@ -357,7 +398,14 @@ bool _shouldShowReadyUi(DesktopUpdaterController controller) {
 }
 
 bool _isMandatoryUpdate(UpdateState state) {
-  return state is UpdateAvailable && state.mandatory;
+  return switch (state) {
+    UpdateAvailable(:final mandatory) ||
+    UpdateReadyToInstall(:final mandatory) ||
+    UpdateFreshInstallRequired(:final mandatory) =>
+      mandatory,
+    UpdateBlockedBySupportPolicy() => true,
+    _ => false,
+  };
 }
 
 String _availableVersionText(DesktopUpdaterController notifier) {
@@ -365,10 +413,10 @@ String _availableVersionText(DesktopUpdaterController notifier) {
         notifier.getLocalization?.newVersionAvailableText,
         [notifier.appName, notifier.appVersion],
       ) ??
-      getLocalizedString("{} {} is available", [
-        notifier.appName,
-        notifier.appVersion,
-      ]) ??
+      getLocalizedString(
+        defaultDesktopUpdateLocalization.newVersionAvailableText,
+        [notifier.appName, notifier.appVersion],
+      ) ??
       "";
 }
 
@@ -376,6 +424,32 @@ String _longUpdateText(DesktopUpdaterController notifier) {
   final state = notifier.state;
   if (state is UpdateFailed) {
     return "Please try again later.";
+  }
+  if (state is UpdateFreshInstallRequired) {
+    return state.freshInstall.message ??
+        notifier.getLocalization?.freshInstallRequiredText ??
+        "This version cannot safely install the update. Please download the "
+            "latest version.";
+  }
+  if (state is UpdateBlockedBySupportPolicy) {
+    return notifier.getLocalization?.supportPolicyBlockedText ??
+        "This version is no longer supported. Please update to continue.";
+  }
+  if (state is UpdateAvailable && state.supportPolicy != null) {
+    final policy = state.supportPolicy!;
+    final enforcedAfterText = formatDesktopUpdateDateTime(
+      policy.enforcedAfter,
+      localization: notifier.getLocalization,
+    );
+    return getLocalizedString(
+          notifier.getLocalization?.supportPolicyWarningText,
+          [policy.minimumSupportedVersion, enforcedAfterText],
+        ) ??
+        getLocalizedString(
+          "Please update to version {} before {}.",
+          [policy.minimumSupportedVersion, enforcedAfterText],
+        ) ??
+        "";
   }
 
   final totalBytes = _updateTotalBytes(
@@ -387,8 +461,7 @@ String _longUpdateText(DesktopUpdaterController notifier) {
         [_formatMegabytes(totalBytes)],
       ) ??
       getLocalizedString(
-        "New version is ready to download, click the button below to start "
-        "downloading. This will download {} MB of data.",
+        defaultDesktopUpdateLocalization.newVersionLongText,
         [_formatMegabytes(totalBytes)],
       ) ??
       "";
@@ -425,8 +498,10 @@ void _showRestartDialog(
   BuildContext context,
   DesktopUpdaterController notifier,
 ) {
+  final isMandatory = _isMandatoryUpdate(notifier.state);
   showDialog<void>(
     context: context,
+    barrierDismissible: !isMandatory,
     builder: (context) {
       return AlertDialog(
         title: Text(
@@ -434,9 +509,12 @@ void _showRestartDialog(
         ),
         content: Text(
           notifier.getLocalization?.restartWarningText ??
-              "A restart is required to complete the update installation.\n"
-                  "Any unsaved changes will be lost. Would you like to "
-                  "restart now?",
+              (isMandatory
+                  ? "This update is required. Save your work before "
+                      "restarting to finish the installation."
+                  : "A restart is required to complete the update "
+                      "installation.\nAny unsaved changes will be lost. "
+                      "Would you like to restart now?"),
         ),
         actions: [
           TextButton(
@@ -444,7 +522,9 @@ void _showRestartDialog(
               Navigator.of(context).pop();
             },
             child: Text(
-              notifier.getLocalization?.warningCancelText ?? "Not now",
+              isMandatory
+                  ? notifier.getLocalization?.saveFirstText ?? "Save first"
+                  : notifier.getLocalization?.warningCancelText ?? "Not now",
             ),
           ),
           TextButton(

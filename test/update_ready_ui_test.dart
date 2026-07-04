@@ -1,5 +1,4 @@
 import "package:desktop_updater/desktop_updater.dart";
-import "package:desktop_updater/updater_controller.dart";
 import "package:flutter/material.dart";
 import "package:flutter_test/flutter_test.dart";
 
@@ -9,9 +8,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: DesktopUpdateDirectCard(controller: controller),
-        ),
+        home: Scaffold(body: DesktopUpdateDirectCard(controller: controller)),
       ),
     );
 
@@ -31,15 +28,136 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: DesktopUpdateDirectCard(controller: controller),
-        ),
+        home: Scaffold(body: DesktopUpdateDirectCard(controller: controller)),
       ),
     );
 
     expect(find.text("Update Available"), findsOneWidget);
     expect(find.text("Download"), findsOneWidget);
     expect(find.text("Skip this version"), findsNothing);
+  });
+
+  testWidgets("fresh install state shows download latest action", (
+    tester,
+  ) async {
+    final controller = _ReadyUiTestController()..showFreshInstallUpdate();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: DesktopUpdateDirectCard(controller: controller)),
+      ),
+    );
+
+    expect(find.text("Install from a fresh download."), findsOneWidget);
+    expect(find.text("Download latest"), findsOneWidget);
+    expect(find.text("Download"), findsNothing);
+  });
+
+  testWidgets("support policy blocked state hides skip action", (tester) async {
+    final controller = _ReadyUiTestController()..showBlockedSupportPolicy();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: DesktopUpdateDirectCard(controller: controller)),
+      ),
+    );
+
+    expect(
+      find.text(
+        "This version is no longer supported. Please update to continue.",
+      ),
+      findsOneWidget,
+    );
+    expect(find.text("Download"), findsOneWidget);
+    expect(find.text("Skip this version"), findsNothing);
+  });
+
+  testWidgets("support policy warning uses a readable UTC deadline", (
+    tester,
+  ) async {
+    final controller = _ReadyUiTestController()
+      ..showAvailableUpdate(
+        supportPolicy: ReleaseSupportPolicy(
+          minimumSupportedVersion: "2.4.0",
+          enforcedAfter: DateTime.utc(2026, 7, 15, 9, 5, 30),
+        ),
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 300,
+            child: UpdateCard(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.text("Please update to version 2.4.0 before 2026-07-15 09:05 UTC."),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets("support policy warning can use a custom date formatter", (
+    tester,
+  ) async {
+    final controller = _ReadyUiTestController(
+      localization: DesktopUpdateLocalization(
+        supportPolicyWarningText: "Install {} by {}.",
+        formatDateTime: (dateTime) => "15 Jul 2026, 12:05",
+      ),
+    )..showAvailableUpdate(
+        supportPolicy: ReleaseSupportPolicy(
+          minimumSupportedVersion: "2.4.0",
+          enforcedAfter: DateTime.utc(2026, 7, 15, 9, 5, 30),
+        ),
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 300,
+            child: UpdateCard(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text("Install 2.4.0 by 15 Jul 2026, 12:05."), findsOneWidget);
+  });
+
+  testWidgets("ready UI uses localization text direction", (tester) async {
+    final controller = _ReadyUiTestController(
+      localization: const DesktopUpdateLocalization(
+        textDirection: TextDirection.rtl,
+        updateAvailableText: "تحديث متوفر",
+      ),
+    )..showAvailableUpdate();
+
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: MaterialApp(
+          home: Scaffold(body: DesktopUpdateDirectCard(controller: controller)),
+        ),
+      ),
+    );
+
+    final textElement = tester.element(find.text("تحديث متوفر"));
+    TextDirection? closestDirection;
+    textElement.visitAncestorElements((element) {
+      final widget = element.widget;
+      if (widget is Directionality) {
+        closestDirection = widget.textDirection;
+        return false;
+      }
+      return true;
+    });
+
+    expect(closestDirection, TextDirection.rtl);
   });
 
   testWidgets("ready UI shows download progress from typed state", (
@@ -53,9 +171,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: DesktopUpdateDirectCard(controller: controller),
-        ),
+        home: Scaffold(body: DesktopUpdateDirectCard(controller: controller)),
       ),
     );
 
@@ -63,14 +179,102 @@ void main() {
     expect(find.text("50% (50.00 MB / 100.00 MB)"), findsOneWidget);
   });
 
+  testWidgets("mandatory ready-to-install card offers a save-first deferral", (
+    tester,
+  ) async {
+    final controller = _ReadyUiTestController()
+      ..showReadyToInstallUpdate(mandatory: true);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 300,
+            child: UpdateCard(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text("Restart to update"));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Not now"), findsNothing);
+    expect(find.text("Save first"), findsOneWidget);
+    expect(find.text("Restart"), findsOneWidget);
+
+    await tester.tap(find.text("Save first"));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Are you sure?"), findsNothing);
+    expect(find.text("Restart to update"), findsOneWidget);
+  });
+
+  testWidgets(
+    "mandatory ready-to-install dialog offers a save-first deferral",
+    (tester) async {
+      final controller = _ReadyUiTestController()
+        ..showReadyToInstallUpdate(mandatory: true);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                return TextButton(
+                  onPressed: () {
+                    showUpdateDialog<void>(context, controller: controller);
+                  },
+                  child: const Text("Show update"),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text("Show update"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Restart to update"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Not now"), findsNothing);
+      expect(find.text("Save first"), findsOneWidget);
+      expect(find.text("Restart"), findsOneWidget);
+    },
+  );
+
+  testWidgets("mandatory save-first action can be localized", (tester) async {
+    final controller = _ReadyUiTestController(
+      localization: const DesktopUpdateLocalization(
+        saveFirstText: "Save my work",
+      ),
+    )..showReadyToInstallUpdate(mandatory: true);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 300,
+            child: UpdateCard(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text("Restart to update"));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Save first"), findsNothing);
+    expect(find.text("Save my work"), findsOneWidget);
+  });
+
   testWidgets("failed ready UI shows a problem report action", (tester) async {
     final controller = _ReadyUiTestController()..showFailedUpdate();
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: DesktopUpdateDirectCard(controller: controller),
-        ),
+        home: Scaffold(body: DesktopUpdateDirectCard(controller: controller)),
       ),
     );
 
@@ -104,30 +308,30 @@ void main() {
     expect(tooltip.message, isNotEmpty);
   });
 
-  testWidgets("error tooltip uses onUpdateFailedTooltip callback when provided",
-      (
-    tester,
-  ) async {
-    final controller = _ReadyUiTestController(
-      localization: const DesktopUpdateLocalization(
-        onUpdateFailedTooltip: _customTooltip,
-      ),
-    )..showFailedUpdate();
+  testWidgets(
+    "error tooltip uses onUpdateFailedTooltip callback when provided",
+    (tester) async {
+      final controller = _ReadyUiTestController(
+        localization: const DesktopUpdateLocalization(
+          onUpdateFailedTooltip: _customTooltip,
+        ),
+      )..showFailedUpdate();
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            height: 300,
-            child: UpdateCard(controller: controller),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 300,
+              child: UpdateCard(controller: controller),
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    final tooltip = tester.widget<Tooltip>(find.byType(Tooltip));
-    expect(tooltip.message, "Custom error message");
-  });
+      final tooltip = tester.widget<Tooltip>(find.byType(Tooltip));
+      expect(tooltip.message, "Custom error message");
+    },
+  );
 
   testWidgets("error tooltip does not reuse release notes error text", (
     tester,
@@ -243,8 +447,9 @@ void main() {
           controller: controller,
           child: Builder(
             builder: (context) {
-              final notifier =
-                  DesktopUpdaterInheritedNotifier.of(context).notifier!;
+              final notifier = DesktopUpdaterInheritedNotifier.of(
+                context,
+              ).notifier!;
               final state = notifier.state;
 
               return Text(
@@ -274,10 +479,7 @@ class _ReadyUiTestController extends DesktopUpdaterController {
     super.releaseNotesUrl,
     super.releaseNotesLoader,
     super.localization,
-  }) : super(
-          appArchiveUrl: null,
-          skipInitialVersionCheck: true,
-        );
+  }) : super(appArchiveUrl: null, skipInitialVersionCheck: true);
 
   bool _skipUpdate = false;
   UpdateState _state = const UpdateIdle();
@@ -314,13 +516,26 @@ class _ReadyUiTestController extends DesktopUpdaterController {
   ReleaseDescriptor? get activeDescriptor => _descriptor;
 
   @override
+  ReleaseFreshInstall? get activeFreshInstall {
+    final state = _state;
+    if (state is UpdateFreshInstallRequired) {
+      return state.freshInstall;
+    }
+    return null;
+  }
+
+  @override
   UpdateState get state => _state;
 
-  void showAvailableUpdate({bool mandatory = false}) {
+  void showAvailableUpdate({
+    bool mandatory = false,
+    ReleaseSupportPolicy? supportPolicy,
+  }) {
     _skipUpdate = false;
     _state = UpdateAvailable(
       descriptor: _descriptor,
       mandatory: mandatory,
+      supportPolicy: supportPolicy,
     );
     notifyListeners();
   }
@@ -336,11 +551,41 @@ class _ReadyUiTestController extends DesktopUpdaterController {
     notifyListeners();
   }
 
-  void showFailedUpdate() {
-    _state = UpdateFailed(
-      StateError("network down"),
-      report: _testReport(),
+  void showFreshInstallUpdate({bool mandatory = true}) {
+    _skipUpdate = false;
+    _state = UpdateFreshInstallRequired(
+      descriptor: _descriptor,
+      mandatory: mandatory,
+      freshInstall: ReleaseFreshInstall(
+        downloadUrl: Uri.parse("https://example.com/download/latest"),
+        message: "Install from a fresh download.",
+      ),
     );
+    notifyListeners();
+  }
+
+  void showBlockedSupportPolicy() {
+    _skipUpdate = false;
+    _state = UpdateBlockedBySupportPolicy(
+      descriptor: _descriptor,
+      supportPolicy: ReleaseSupportPolicy(
+        minimumSupportedVersion: "2.4.0",
+        enforcedAfter: DateTime.utc(2026, 7, 15),
+      ),
+    );
+    notifyListeners();
+  }
+
+  void showReadyToInstallUpdate({bool mandatory = false}) {
+    _state = UpdateReadyToInstall(
+      stagingPath: "/tmp/stage",
+      mandatory: mandatory,
+    );
+    notifyListeners();
+  }
+
+  void showFailedUpdate() {
+    _state = UpdateFailed(StateError("network down"), report: _testReport());
     notifyListeners();
   }
 

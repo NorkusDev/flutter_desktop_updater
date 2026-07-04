@@ -112,8 +112,15 @@ wrapper widgets handle placement.
 `UpdateCard` switches its actions from the typed update state:
 
 - `UpdateAvailable`: shows download and, when optional, skip actions.
+- `UpdateFreshInstallRequired`: shows the fresh-install message and
+  `Download latest` action instead of in-app download.
+- `UpdateBlockedBySupportPolicy`: shows blocking required-update UI and hides
+  skip actions.
 - `UpdateDownloading`: shows a progress action.
-- `UpdateReadyToInstall`: shows the restart/install action.
+- `UpdateReadyToInstall`: shows the restart/install action. Optional releases
+  keep the normal "Not now" restart prompt. Mandatory releases keep the staged
+  update active, hide "Not now", and show "Save first" plus "Restart" so users
+  can save unsaved work without skipping the required update.
 - `UpdateFailed`: shows a retry action and, when a diagnostics report exists,
   a "View report" action.
 
@@ -250,12 +257,30 @@ while others prefer quiet inline UI. The listener keeps that choice explicit.
 It also guards against duplicate dialogs while the same update request is
 already being shown.
 
+Mandatory update dialogs are intentionally not the same as optional restart
+prompts. A mandatory release removes skip and "Not now" choices, but still keeps
+a "Save first" action in the restart confirmation by default. In
+`UpdateDialogListener`, that action dismisses the modal update flow so the user
+can return to the app and save work; it does not persist a skipped version.
+
+If a dialog-based integration should restart without the extra confirmation,
+pass `mandatoryReadyToInstallBehavior:
+MandatoryReadyToInstallBehavior.restartWithoutPrompt` to
+`UpdateDialogListener` or `showUpdateDialog()`.
+
+Fresh-install dialogs use the package default copy plus the optional
+release-specific `freshInstall.message`, and route users to `Download latest`.
+Support-policy blocking dialogs are not dismissible through the ready-made
+listener.
+
 You can also open the dialog yourself:
 
 ```dart
 await showUpdateDialog<void>(
   context,
   controller: controller,
+  mandatoryReadyToInstallBehavior:
+      MandatoryReadyToInstallBehavior.restartWithoutPrompt,
 );
 ```
 

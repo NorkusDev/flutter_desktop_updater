@@ -19,7 +19,7 @@ Add the package:
 
 ```yaml
 dependencies:
-  desktop_updater: ^2.3.0
+  desktop_updater: ^2.4.3-dev.1
 ```
 
 Point your app at the hosted archive:
@@ -29,6 +29,10 @@ final controller = DesktopUpdaterController(
   appArchiveUrl: Uri.parse("https://updates.example.com/app-archive.json"),
 );
 ```
+
+Private update hosts can add runtime authentication headers for update metadata,
+artifacts, and hosted release notes with `requestHeadersProvider`; see
+[Runtime request headers](doc/runtime-request-headers.md).
 
 Add `desktop_updater.yaml` at your app repository root, next to
 `pubspec.yaml`:
@@ -54,6 +58,33 @@ With only `updates.baseUrl`, publish creates an upload-ready package under
 `dist/desktop_updater` and prints the manual upload and validate instructions.
 With an upload provider configured, it uploads versioned files first, validates
 them, uploads `app-archive.json` last, then validates hosted update selection.
+
+## Additional Release Files
+
+Use `additionalFiles` when PDFs, language packs, manuals, or other app-owned
+files must ship with the desktop update but are not produced by Flutter:
+
+```yaml
+additionalFiles:
+  - source: release-assets/manuals/*
+    destination: docs/manuals
+    platforms: [windows, linux]
+  - source: release-assets/manuals/*
+    destination: Contents/Resources/Manuals
+    platforms: [macos]
+```
+
+`release publish` copies these files after `flutter build` and before macOS
+notarization, app-owned `prePackage` signing hooks, and zip packaging. That
+keeps the packaged artifact consistent with platform signing and trust gates.
+
+## Linux Zip Permissions
+
+Linux update zips must keep Unix file mode metadata for executable files in the
+bundle. `release publish --platform linux` creates artifacts with those modes,
+and the updater restores them while staging the verified zip before the native
+helper replaces the installed bundle. If you build Linux update zips with custom
+tooling, make sure the app runner remains executable in the archive.
 
 ## EL10
 
@@ -91,6 +122,40 @@ guidance, and when to choose each surface.
 
 For custom UI, switch on `controller.state`.
 
+## Localization And i18n
+
+Ready-made updater UI can load bundled starter translations, app-owned JSON
+assets, direct string overrides, or an app-owned resolver such as
+`AppLocalizations` or `_()`. RTL locales such as Arabic and Hebrew can set or
+infer `TextDirection.rtl`.
+
+Use `DesktopUpdateLocalizationLoader.fromBundledLocale("tr_TR")` to force a
+specific bundled language, or `fromPlatformLocale()` to follow the system
+locale. Support-policy dates default to `YYYY-MM-DD HH:mm UTC`; pass
+`DesktopUpdateLocalization(formatDateTime: ...)` when the app needs its own
+date format.
+
+See [Localization and i18n](docs/localization.md) for the recommended setup,
+JSON schema, runtime language switching, RTL behavior, and Arabic, Hebrew,
+Japanese, Korean, and Cyrillic screenshots.
+
+## Update Policy Modes
+
+Update policy lives in `app-archive.json`, so apps can change release pressure
+without rebuilding the old client:
+
+- Optional updates are soft prompts with `Download`, optional skip persistence,
+  and restart deferral.
+- Mandatory updates keep prompting until installed, hide skip actions, and keep
+  a `Save first` path so users can protect unsaved work before restart.
+- `supportPolicy` adds a minimum supported version and enforcement deadline so
+  old clients can warn first, then fail closed after the deadline.
+- `freshInstall` marks releases that should send users to a fresh download
+  instead of the in-app updater.
+
+See [Update policy modes](doc/update-policy-modes.md) for JSON examples, CLI
+flags, and the built-in card, sliver, and dialog behavior for each state.
+
 ## Release Notes
 
 Use `releaseNotesLoader` when notes should depend on the selected descriptor,
@@ -117,6 +182,12 @@ final controller = DesktopUpdaterController(
   releaseNotesUrl: Uri.parse("https://updates.example.com/release-notes.json"),
 );
 ```
+
+When `releaseNotesUrl` points at a private host, `requestHeadersProvider` is
+used for the release notes request too. See
+[Runtime request headers](doc/runtime-request-headers.md) for sharing one auth
+token across update files and release notes, or routing different headers by
+request URL.
 
 The simple contributor-friendly JSON shape uses a `data` array:
 
@@ -216,13 +287,19 @@ desktop_updater handles update mechanics. Your app still owns platform trust:
 
 ## Documentation
 
+- [Update policy modes](doc/update-policy-modes.md): optional, mandatory,
+  support-policy, and fresh-install release behavior.
 - [Publishing desktop updates](docs/publishing.md): setup, YAML config,
-  manual upload, providers, validation, CI, and platform-specific release work.
+  additional release files, manual upload, providers, update policy modes,
+  validation, CI, and platform-specific release work.
 - [Windows and Linux production release options](docs/windows-linux-production-release.md):
   signing choices, native package channels, and country or provider
   restrictions.
 - [Ready-made UI widgets](docs/ui-widgets.md): screenshots and guidance for
   the built-in card, sliver, dialog, and custom state-driven UI surfaces.
+- [Localization and i18n](docs/localization.md): bundled translations, custom
+  JSON, resolver-based i18n, runtime locale changes, RTL behavior, and
+  multi-script screenshots.
 - [Diagnostics and recovery](docs/diagnostics-and-recovery.md): where logs are
   written, how helper diagnostics work, and how to wire support collection.
 - [GitHub Actions CI/CD guide](docs/github-actions-ci-cd.md): longer CI
@@ -230,6 +307,11 @@ desktop_updater handles update mechanics. Your app still owns platform trust:
 - [1.x to 2.0 migration guide](docs/migration/1.x-to-2.0.md): migration
   commands and compatibility notes.
 - [2.0 roadmap](docs/2.0-roadmap.md)
+
+Maintainers and agentic contributors should start with [AGENTS.md](AGENTS.md),
+then use [Harness engineering](docs/harness-engineering.md) and the
+[execution plan index](docs/exec-plans/index.md) for repo-local workflow,
+validation, and plan status.
 
 ## Advanced Commands
 
@@ -241,3 +323,13 @@ dart run desktop_updater:package --help
 dart run desktop_updater:app_archive --help
 dart run desktop_updater:verify --help
 ```
+
+## Support
+
+If `desktop_updater` saves you maintenance time, you can support ongoing work
+through GitHub Sponsors.
+
+Sponsorship helps fund cross-platform testing, release tooling, and maintenance
+for Windows, macOS, and Linux update flows.
+
+[Become a sponsor](https://github.com/sponsors/MarlonJD)

@@ -1,7 +1,9 @@
 import "dart:async";
+import "dart:io";
 
 import "package:desktop_updater/desktop_updater_platform_interface.dart";
 import "package:desktop_updater/src/core/release_descriptor.dart";
+import "package:desktop_updater/src/core/release_index.dart";
 import "package:desktop_updater/src/core/release_notes.dart";
 import "package:desktop_updater/src/core/update_client.dart";
 import "package:desktop_updater/src/core/update_diagnostics.dart";
@@ -11,6 +13,8 @@ import "package:desktop_updater/src/core/update_recovery.dart";
 import "package:desktop_updater/src/core/update_state.dart";
 import "package:desktop_updater/src/core/update_telemetry.dart";
 import "package:desktop_updater/src/current_version.dart";
+import "package:desktop_updater/src/io/http_update_transport.dart"
+    show UpdateRequestHeadersProvider;
 import "package:desktop_updater/src/io/release_notes_fetcher.dart";
 import "package:desktop_updater/src/localization.dart";
 import "package:desktop_updater/src/manual_update_check_result.dart";
@@ -25,10 +29,17 @@ export "package:desktop_updater/src/core/update_diagnostics_recorder.dart";
 export "package:desktop_updater/src/core/update_preferences.dart";
 export "package:desktop_updater/src/core/update_recovery.dart";
 export "package:desktop_updater/src/core/update_telemetry.dart";
+export "package:desktop_updater/src/io/http_update_transport.dart"
+    show UpdateRequestHeadersProvider;
 
 /// Loads release notes for the selected update descriptor.
 typedef ReleaseNotesLoader = Future<ReleaseNotes> Function(
   ReleaseDescriptor descriptor,
+);
+
+/// Opens an external URL, such as a fresh installer download page.
+typedef ExternalUrlLauncher = Future<void> Function(
+  Uri url,
 );
 
 /// Coordinates update checks, downloads, and install handoff for UI code.
@@ -44,7 +55,7 @@ class DesktopUpdaterController extends ChangeNotifier {
   /// the controller starts an asynchronous update check during construction.
   DesktopUpdaterController({
     required Uri? appArchiveUrl,
-    this.localization,
+    DesktopUpdateLocalization? localization,
     this.allowUnsignedMacOSUpdates = false,
     this.channel = "stable",
     this.installationIdentity,
@@ -54,21 +65,29 @@ class DesktopUpdaterController extends ChangeNotifier {
     this.telemetry,
     this.isMinimumOSSupported,
     this.preservedFiles = const [],
+    this.requestHeadersProvider,
     UpdateDiagnosticsRecorder? diagnosticsRecorder,
     Future<void> Function(UpdateProblemReport report)? onProblemReport,
     FutureOr<void> Function(UpdateCleanupReport report)? onCleanupReport,
     bool skipInitialVersionCheck = false,
     ReleaseNotesLoader? releaseNotesLoader,
     Uri? releaseNotesUrl,
-  })  : _skipInitialVersionCheck = skipInitialVersionCheck,
+    ExternalUrlLauncher? externalUrlLauncher,
+  })  : _localization = localization,
+        _skipInitialVersionCheck = skipInitialVersionCheck,
         _diagnosticsRecorder =
             diagnosticsRecorder ?? UpdateDiagnosticsRecorder(channel: channel),
         _onProblemReport = onProblemReport,
         _onCleanupReport = onCleanupReport,
         _releaseNotesLoader = releaseNotesLoader,
         _releaseNotesUrl = releaseNotesUrl,
-        _releaseNotesFetcher =
-            releaseNotesUrl == null ? null : ReleaseNotesFetcher() {
+        _externalUrlLauncher =
+            externalUrlLauncher ?? defaultExternalUrlLauncher,
+        _releaseNotesFetcher = releaseNotesUrl == null
+            ? null
+            : ReleaseNotesFetcher(
+                requestHeadersProvider: requestHeadersProvider,
+              ) {
     if (appArchiveUrl != null) {
       init(appArchiveUrl);
     }
@@ -82,7 +101,7 @@ class DesktopUpdaterController extends ChangeNotifier {
   @visibleForTesting
   DesktopUpdaterController.forTesting({
     required Uri? appArchiveUrl,
-    this.localization,
+    DesktopUpdateLocalization? localization,
     this.allowUnsignedMacOSUpdates = false,
     this.channel = "stable",
     this.installationIdentity,
@@ -92,21 +111,31 @@ class DesktopUpdaterController extends ChangeNotifier {
     this.telemetry,
     this.isMinimumOSSupported,
     this.preservedFiles = const [],
+    this.requestHeadersProvider,
     UpdateDiagnosticsRecorder? diagnosticsRecorder,
     Future<void> Function(UpdateProblemReport report)? onProblemReport,
     FutureOr<void> Function(UpdateCleanupReport report)? onCleanupReport,
     bool skipInitialVersionCheck = false,
     ReleaseNotesLoader? releaseNotesLoader,
     Uri? releaseNotesUrl,
-  })  : _skipInitialVersionCheck = skipInitialVersionCheck,
+    ReleaseNotesFetcher? releaseNotesFetcher,
+    ExternalUrlLauncher? externalUrlLauncher,
+  })  : _localization = localization,
+        _skipInitialVersionCheck = skipInitialVersionCheck,
         _diagnosticsRecorder =
             diagnosticsRecorder ?? UpdateDiagnosticsRecorder(channel: channel),
         _onProblemReport = onProblemReport,
         _onCleanupReport = onCleanupReport,
         _releaseNotesLoader = releaseNotesLoader,
         _releaseNotesUrl = releaseNotesUrl,
-        _releaseNotesFetcher =
-            releaseNotesUrl == null ? null : ReleaseNotesFetcher() {
+        _externalUrlLauncher =
+            externalUrlLauncher ?? defaultExternalUrlLauncher,
+        _releaseNotesFetcher = releaseNotesFetcher ??
+            (releaseNotesUrl == null
+                ? null
+                : ReleaseNotesFetcher(
+                    requestHeadersProvider: requestHeadersProvider,
+                  )) {
     if (appArchiveUrl != null) {
       init(appArchiveUrl);
     }
@@ -117,11 +146,22 @@ class DesktopUpdaterController extends ChangeNotifier {
   /// Whether construction should avoid starting the first automatic check.
   bool get skipInitialVersionCheck => _skipInitialVersionCheck;
 
+  DesktopUpdateLocalization? _localization;
+
   /// Optional strings used by bundled update UI.
-  DesktopUpdateLocalization? localization;
+  DesktopUpdateLocalization? get localization => _localization;
+
+  /// Updates localization values used by bundled update UI.
+  set localization(DesktopUpdateLocalization? value) {
+    if (identical(_localization, value)) {
+      return;
+    }
+    _localization = value;
+    notifyListeners();
+  }
 
   /// Current localization values used by bundled update UI.
-  DesktopUpdateLocalization? get getLocalization => localization;
+  DesktopUpdateLocalization? get getLocalization => _localization;
 
   /// Release channel used for update selection and skip preferences.
   final String channel;
@@ -174,6 +214,9 @@ class DesktopUpdaterController extends ChangeNotifier {
   /// Optional app-owned minimum OS support policy.
   final MinimumOSSupportChecker? isMinimumOSSupported;
 
+  /// Optional app-owned HTTP headers for update metadata and artifact requests.
+  final UpdateRequestHeadersProvider? requestHeadersProvider;
+
   /// Allows macOS Release installs to bypass native signing, Gatekeeper,
   /// stapler, and Team ID checks.
   ///
@@ -211,6 +254,16 @@ class DesktopUpdaterController extends ChangeNotifier {
   /// Descriptor selected by the latest successful update check, if any.
   ReleaseDescriptor? get activeDescriptor => _activeDescriptor;
 
+  ReleaseFreshInstall? _activeFreshInstall;
+
+  /// Fresh-install policy for the active update, when present.
+  ReleaseFreshInstall? get activeFreshInstall => _activeFreshInstall;
+
+  ReleaseSupportPolicy? _activeSupportPolicy;
+
+  /// Support policy applying to the active update, when present.
+  ReleaseSupportPolicy? get activeSupportPolicy => _activeSupportPolicy;
+
   UpdateClient? _client;
   String? _stagingPath;
   String? _currentAppVersion;
@@ -219,6 +272,7 @@ class DesktopUpdaterController extends ChangeNotifier {
   final ReleaseNotesLoader? _releaseNotesLoader;
   final Uri? _releaseNotesUrl;
   final ReleaseNotesFetcher? _releaseNotesFetcher;
+  final ExternalUrlLauncher _externalUrlLauncher;
   ReleaseNotesState _releaseNotesState = const ReleaseNotesIdle();
   ReleaseNotes? _cachedReleaseNotes;
   String? _cachedReleaseNotesKey;
@@ -276,6 +330,15 @@ class DesktopUpdaterController extends ChangeNotifier {
     await callback(report);
   }
 
+  /// Opens the active fresh-install download URL.
+  Future<void> openFreshInstallDownload() async {
+    final freshInstall = activeFreshInstall;
+    if (freshInstall == null) {
+      throw StateError("No fresh-install download URL is available.");
+    }
+    await _externalUrlLauncher(freshInstall.downloadUrl);
+  }
+
   /// Sets the app archive URL and starts the initial update check when enabled.
   void init(Uri url) {
     _appArchiveUrl = url;
@@ -326,10 +389,7 @@ class DesktopUpdaterController extends ChangeNotifier {
     _state = const UpdateChecking();
     emitUpdateTelemetry(
       telemetry,
-      UpdateTelemetryEvent.checkStarted(
-        source: archiveUrl,
-        channel: channel,
-      ),
+      UpdateTelemetryEvent.checkStarted(source: archiveUrl, channel: channel),
     );
     notifyListeners();
 
@@ -345,6 +405,7 @@ class DesktopUpdaterController extends ChangeNotifier {
         currentVersion: currentVersion,
         channel: channel,
         installationIdentity: installationIdentity,
+        requestHeadersProvider: requestHeadersProvider,
         telemetry: telemetry,
         isMinimumOSSupported: isMinimumOSSupported,
       );
@@ -352,6 +413,8 @@ class DesktopUpdaterController extends ChangeNotifier {
       if (result == null) {
         _client = null;
         _activeDescriptor = null;
+        _activeFreshInstall = null;
+        _activeSupportPolicy = null;
         _stagingPath = null;
         _skipUpdate = false;
         _clearReleaseNotesCache();
@@ -365,9 +428,25 @@ class DesktopUpdaterController extends ChangeNotifier {
         return;
       }
 
-      if (!result.item.mandatory && await _isSkipped(result.descriptor)) {
+      final supportPolicy = result.index.supportPolicy;
+      final activeSupportPolicy =
+          supportPolicy != null && supportPolicy.appliesTo(currentVersion)
+              ? supportPolicy
+              : null;
+      final supportPolicyEnforced = activeSupportPolicy?.isEnforced(
+            currentVersion: currentVersion,
+            now: DateTime.now().toUtc(),
+          ) ??
+          false;
+      final freshInstall = result.item.freshInstall;
+
+      if (!result.item.mandatory &&
+          !supportPolicyEnforced &&
+          await _isSkipped(result.descriptor)) {
         _client = null;
         _activeDescriptor = null;
+        _activeFreshInstall = null;
+        _activeSupportPolicy = null;
         _stagingPath = null;
         _skipUpdate = true;
         _clearReleaseNotesCache();
@@ -384,6 +463,8 @@ class DesktopUpdaterController extends ChangeNotifier {
       _skipUpdate = false;
       _client = client;
       _activeDescriptor = result.descriptor;
+      _activeFreshInstall = freshInstall;
+      _activeSupportPolicy = activeSupportPolicy;
       _stagingPath = null;
       _diagnosticsRecorder.record(
         stage: UpdateDiagnosticStage.descriptor,
@@ -391,10 +472,25 @@ class DesktopUpdaterController extends ChangeNotifier {
         message: "Update selected: ${result.descriptor.version} "
             "(${result.descriptor.platform}/${result.descriptor.channel}).",
       );
-      _state = UpdateAvailable(
-        descriptor: result.descriptor,
-        mandatory: result.item.mandatory,
-      );
+      if (freshInstall != null) {
+        _state = UpdateFreshInstallRequired(
+          descriptor: result.descriptor,
+          freshInstall: freshInstall,
+          mandatory: result.item.mandatory || supportPolicyEnforced,
+          supportPolicy: activeSupportPolicy,
+        );
+      } else if (supportPolicyEnforced && activeSupportPolicy != null) {
+        _state = UpdateBlockedBySupportPolicy(
+          descriptor: result.descriptor,
+          supportPolicy: activeSupportPolicy,
+        );
+      } else {
+        _state = UpdateAvailable(
+          descriptor: result.descriptor,
+          mandatory: result.item.mandatory,
+          supportPolicy: activeSupportPolicy,
+        );
+      }
       emitUpdateTelemetry(
         telemetry,
         UpdateTelemetryEvent.updateSelected(
@@ -447,10 +543,7 @@ class DesktopUpdaterController extends ChangeNotifier {
     try {
       await checkVersion();
     } on Object catch (error, stackTrace) {
-      _state = UpdateFailed(
-        error,
-        report: _reportFromStateOrBuild(error),
-      );
+      _state = UpdateFailed(error, report: _reportFromStateOrBuild(error));
       notifyListeners();
       return ManualUpdateCheckFailed(error, stackTrace);
     }
@@ -463,11 +556,23 @@ class DesktopUpdaterController extends ChangeNotifier {
       );
     }
 
-    if (currentState is UpdateFailed) {
-      return ManualUpdateCheckFailed(
-        currentState.error,
-        StackTrace.current,
+    if (currentState is UpdateFreshInstallRequired) {
+      return ManualUpdateCheckFreshInstallRequired(
+        descriptor: currentState.descriptor,
+        freshInstall: currentState.freshInstall,
+        mandatory: currentState.mandatory,
       );
+    }
+
+    if (currentState is UpdateBlockedBySupportPolicy) {
+      return ManualUpdateCheckBlockedBySupportPolicy(
+        descriptor: currentState.descriptor,
+        supportPolicy: currentState.supportPolicy,
+      );
+    }
+
+    if (currentState is UpdateFailed) {
+      return ManualUpdateCheckFailed(currentState.error, StackTrace.current);
     }
 
     return const ManualUpdateCheckUpToDate();
@@ -483,6 +588,16 @@ class DesktopUpdaterController extends ChangeNotifier {
     if (descriptor == null || client == null) {
       throw StateError("No zip-first update is available.");
     }
+    if (_state is UpdateFreshInstallRequired) {
+      throw StateError("This update must be installed from a fresh download.");
+    }
+    final mandatory = switch (_state) {
+      UpdateAvailable(:final mandatory) ||
+      UpdateFreshInstallRequired(:final mandatory) =>
+        mandatory,
+      UpdateBlockedBySupportPolicy() => true,
+      _ => false,
+    };
 
     _stagingPath = null;
     _diagnosticsRecorder.record(
@@ -529,7 +644,10 @@ class DesktopUpdaterController extends ChangeNotifier {
           level: UpdateDiagnosticLevel.info,
           message: "Update staged at ${result.stagingPath}",
         );
-      _state = UpdateReadyToInstall(stagingPath: result.stagingPath);
+      _state = UpdateReadyToInstall(
+        stagingPath: result.stagingPath,
+        mandatory: mandatory,
+      );
       notifyListeners();
     } on Object catch (error) {
       _diagnosticsRecorder.record(
@@ -917,4 +1035,33 @@ String? _formatVersionInfo(DesktopVersionInfo version) {
     return versionName;
   }
   return buildNumber?.toString();
+}
+
+/// Default desktop URL launcher used by ready-made fresh-install UI.
+Future<void> defaultExternalUrlLauncher(Uri url) async {
+  final scheme = url.scheme.toLowerCase();
+  if (scheme != "http" && scheme != "https") {
+    throw ArgumentError.value(url, "url", "Only http(s) URLs can be opened.");
+  }
+
+  final urlText = url.toString();
+  final executable = switch (Platform.operatingSystem) {
+    "macos" => "open",
+    "windows" => "rundll32",
+    _ => "xdg-open",
+  };
+  final arguments = switch (Platform.operatingSystem) {
+    "windows" => ["url.dll,FileProtocolHandler", urlText],
+    _ => [urlText],
+  };
+
+  final result = await Process.run(executable, arguments);
+  if (result.exitCode != 0) {
+    throw ProcessException(
+      executable,
+      arguments,
+      "${result.stdout}\n${result.stderr}",
+      result.exitCode,
+    );
+  }
 }

@@ -12,6 +12,18 @@ dart run desktop_updater:release publish --platform linux
 The command builds one platform, packages the release, writes a consistent local
 layout, optionally uploads it, and validates the hosted update path.
 
+Build-time Dart defines can be forwarded to Flutter with repeated
+`--dart-define` options:
+
+```sh
+dart run desktop_updater:release publish --platform windows \
+  --dart-define=MY_VAR=value \
+  --dart-define=FEATURE_FLAG=true
+```
+
+Those values are passed to `flutter build` so the app can read them through
+`String.fromEnvironment`, `bool.fromEnvironment`, or `int.fromEnvironment`.
+
 ## EL10 Working Scenario
 
 Think of your update host as one shelf on the internet.
@@ -142,6 +154,176 @@ length, and SHA-256. It does not replace app-owned platform trust: Authenticode,
 Apple Developer ID notarization, native package signing, store review, and
 Linux repository signing remain the app publisher's responsibility.
 
+## Update Policy Modes
+
+`mandatory` is implemented today on each `app-archive.json` item. Use it for
+updates that must keep appearing until installed:
+
+```sh
+dart run desktop_updater:release publish \
+  --platform macos \
+  --mandatory
+```
+
+### Optional Updates
+
+When `mandatory` is absent or `false`, the ready-made UI treats the release as a
+soft prompt:
+
+- Shows `Download`.
+- Shows `Skip this version` when skip persistence is available.
+- Allows the restart confirmation to use `Not now`.
+- May persist a skipped version through the app-supplied `UpdatePreferences`.
+
+### Mandatory Updates
+
+When `mandatory` is `true`, the release is required but still protects unsaved
+work:
+
+- Skipped versions are ignored for update selection.
+- Ready-made available-update UI hides `Skip this version`.
+- After download, `UpdateReadyToInstall` keeps the mandatory state.
+- Restart confirmation shows `Save first` and `Restart`.
+- In card-based UI, `Save first` only closes the confirmation so the user can
+  save work while the update surface remains active.
+- In `UpdateDialogListener`, `Save first` dismisses the modal update flow so the
+  user can return to the app and save work.
+- The label can be localized with `DesktopUpdateLocalization.saveFirstText`.
+- Dialog-based UI can pass `MandatoryReadyToInstallBehavior.restartWithoutPrompt`
+  to restart from the ready-to-install action without showing `Save first`.
+
+For security-critical or protocol-breaking mandatory releases, also add a
+support deadline so old clients eventually fail closed.
+
+### Support Policy
+
+`supportPolicy` is a top-level `app-archive.json` fail-safe. It belongs at the
+top level because the app needs the policy before downloading any artifact:
+
+```json
+{
+  "schemaVersion": 3,
+  "appName": "Example App",
+  "supportPolicy": {
+    "minimumSupportedVersion": "2.4.0",
+    "enforcedAfter": "2026-07-15T00:00:00Z"
+  },
+  "items": [
+    {
+      "version": "2.4.0",
+      "buildNumber": 240,
+      "platform": "macos",
+      "channel": "stable",
+      "mandatory": true,
+      "release": "https://updates.example.com/releases/2.4.0/macos/release.json"
+    }
+  ]
+}
+```
+
+Runtime behavior:
+
+- Missing `supportPolicy`: no support deadline is used.
+- If one support-policy field is present, both fields are required.
+- Before `enforcedAfter`: warn strongly, but allow normal app usage.
+- After `enforcedAfter`: replace normal usage with blocking required-update UI.
+- If a selected release also has `freshInstall`, the blocking UI points to the
+  fresh download instead of the in-app updater.
+
+### Fresh Install
+
+`freshInstall` is separate from `mandatory`. It means this release should be
+installed from a fresh download instead of the in-app updater. It is item-level
+because the requirement can differ by version, platform, channel, signing
+transition, or updater-runtime transition.
+
+```json
+{
+  "version": "2.4.0",
+  "buildNumber": 240,
+  "platform": "macos",
+  "channel": "stable",
+  "mandatory": true,
+  "freshInstall": {
+    "downloadUrl": "https://example.com/download/latest",
+    "message": "This update must be installed from a fresh download."
+  },
+  "release": "https://updates.example.com/releases/2.4.0/macos/release.json"
+}
+```
+
+Runtime behavior:
+
+- Missing `freshInstall`: use the normal in-app update flow.
+- Present `freshInstall`: show package-provided fresh-install UI, unless the app
+  supplies custom UI for that state.
+- `downloadUrl` is required.
+- `message` is optional release-specific copy.
+- Default titles, buttons, and common body text should live in Flutter
+  localization, not in `app-archive.json`.
+- The ready-made UI opens `downloadUrl` through the controller's external URL
+  launcher. Apps can pass a custom launcher when they need analytics, routing,
+  or a controlled support flow.
+
+### Publish Flags
+
+The CLI generates policy JSON only when the matching optional flags are
+provided:
+
+Mandatory only:
+
+```sh
+dart run desktop_updater:release publish \
+  --platform macos \
+  --mandatory
+```
+
+This writes `"mandatory": true` on the generated `app-archive.json` item.
+
+Support deadline only:
+
+```sh
+dart run desktop_updater:release publish \
+  --platform macos \
+  --minimum-supported-version 2.4.0 \
+  --enforced-after 2026-07-15T00:00:00Z
+```
+
+This writes top-level `supportPolicy` and leaves the release item optional
+unless `--mandatory` is also present.
+
+Fresh install only:
+
+```sh
+dart run desktop_updater:release publish \
+  --platform macos \
+  --fresh-install-url https://example.com/download/latest \
+  --fresh-install-message "This update must be installed from a fresh download."
+```
+
+This writes item-level `freshInstall`. Omit `--fresh-install-message` when the
+default localized ready-made UI copy is enough.
+
+Mandatory update with a fail-safe deadline and fresh download fallback:
+
+```sh
+dart run desktop_updater:release publish \
+  --platform macos \
+  --mandatory \
+  --minimum-supported-version 2.4.0 \
+  --enforced-after 2026-07-15T00:00:00Z \
+  --fresh-install-url https://example.com/download/latest \
+  --fresh-install-message "This update must be installed from a fresh download."
+```
+
+Generation rules:
+
+- If `--minimum-supported-version` and `--enforced-after` are both absent,
+  omit `supportPolicy`.
+- If one support-policy flag is present, require the other.
+- If `--fresh-install-url` is absent, omit `freshInstall`.
+- `--fresh-install-message` is valid only with `--fresh-install-url`.
+
 ## Runtime Policies
 
 The runtime ships product-grade defaults but keeps storage and telemetry
@@ -258,6 +440,46 @@ staging or install handoff.
 
 Apps do not need a separate API to opt in. Use HTTPS storage that supports
 range requests for the best recovery behavior, especially for large artifacts.
+
+### Runtime Request Headers
+
+For private hosts that require app-owned authentication, pass
+`requestHeadersProvider` at runtime:
+
+```dart
+final controller = DesktopUpdaterController(
+  appArchiveUrl: Uri.parse("https://updates.example.com/app-archive.json"),
+  requestHeadersProvider: (source) async {
+    final token = await myAuth.currentUpdateToken();
+    return {"authorization": "Bearer $token"};
+  },
+);
+```
+
+How it works:
+
+1. The updater asks the provider for each HTTP(S) request.
+2. The returned headers are added before the request is sent.
+3. If a partial artifact exists, the updater still adds its own `Range` header
+   after app headers so resumable downloads keep working.
+
+The provider runs for:
+
+- `app-archive.json`
+- the selected `release.json`
+- the selected update artifact zip
+
+Keep credentials out of `release.json`, `app-archive.json`, and
+`desktop_updater.yaml`; those files can be signed, cached, uploaded, and
+inspected independently of the user's runtime session. Use the provider for
+short-lived bearer tokens, account-scoped update tokens, or private reverse
+proxy headers owned by your app session.
+
+When possible, signed URLs or an app-owned private proxy remain good fits
+because the update descriptor can still point at exact URLs without exposing
+bucket listing. S3-compatible publish credentials still belong to the
+publish/upload side; runtime S3 access should be exposed as fetchable HTTPS
+URLs, signed URLs, proxy URLs, or app-owned request headers.
 
 ## Common Minimum Setup
 
@@ -573,6 +795,51 @@ Use optional provider blocks when you want automatic upload:
 Only one provider block can be configured at a time. If no provider block is
 configured, `manual` is used.
 
+### Additional Release Files
+
+Use `additionalFiles` for release-owned files that should be installed with the
+desktop app but are not created by Flutter itself, such as PDF manuals, language
+packs, help bundles, templates, or app-specific data files:
+
+```yaml
+additionalFiles:
+  - source: release-assets/manuals/*
+    destination: docs/manuals
+    platforms: [windows, linux]
+  - source: release-assets/manuals/*
+    destination: Contents/Resources/Manuals
+    platforms: [macos]
+```
+
+Each entry has:
+
+- `source`: a file, directory, or glob. Relative paths are resolved from the app
+  project root; absolute paths are also accepted. `*` matches within one path
+  segment, and `**` can be used for recursive matches.
+- `destination`: a relative directory inside the platform release output. The
+  command rejects absolute destinations and paths that would escape the app
+  output.
+- `platforms`: optional platform filter. Omit it when one entry should apply to
+  every platform.
+
+Matching files and directories are copied into `destination` by basename. On
+macOS, put extra resources under the app bundle, normally
+`Contents/Resources/...`; on Windows and Linux, use a directory relative to the
+release bundle root. Symbolic links are rejected so release packages cannot
+silently point outside the app output.
+
+`release publish` copies additional files after `flutter build` and before:
+
+- built-in macOS signing, notarization, stapling, and Gatekeeper checks;
+- app-owned `hooks.prePackage` signing or trust gates;
+- zip packaging and SHA-256/length descriptor generation.
+
+That order is intentional: the release output is not mutated after the platform
+trust gates run, so macOS signatures and notarization stay valid and Windows or
+Linux signing hooks see the final files. Do not use `hooks.postPackage` to add
+or change files inside the already packaged app; use `additionalFiles` or a
+build-system resource step instead.
+
 ### App-Owned Release Hooks
 
 Optional hooks let your app keep platform trust work in your own scripts while
@@ -849,6 +1116,16 @@ What you should do for production trust:
 - Verify signatures before packaging.
 - Keep the app executable and package identity stable.
 - Test update install from a normal user account, not only an admin shell.
+
+When the app is installed under a protected machine-wide directory such as
+`C:\Program Files`, the Windows helper treats that install root as requiring
+elevation when the current process is not already elevated. It also checks
+whether other app directories are writable before scheduling the install. If
+the current process is not elevated and the app directory is protected or not
+writable, it starts the verified helper through the normal Windows UAC prompt.
+If the user cancels the prompt, `installUpdate` returns an `InstallError` and
+the app stays open. Per-user installs under locations such as `AppData\Local`
+continue without a UAC prompt when the app directory is writable.
 
 Unsigned Windows Release builds can be release-mechanics ready, but users can
 still see publisher-trust warnings.

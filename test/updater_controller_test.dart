@@ -42,6 +42,25 @@ void main() {
     expect(notifications, 1);
   });
 
+  test("localization updates notify ready-made UI listeners", () {
+    final controller = DesktopUpdaterController(
+      appArchiveUrl: null,
+      skipInitialVersionCheck: true,
+    );
+    var notifications = 0;
+
+    controller
+      ..addListener(() {
+        notifications += 1;
+      })
+      ..localization = const DesktopUpdateLocalization(
+        restartText: "Install update",
+      );
+
+    expect(controller.getLocalization?.restartText, "Install update");
+    expect(notifications, 1);
+  });
+
   test(
     "automatic startup check failure updates state without unhandled error",
     () async {
@@ -85,6 +104,47 @@ void main() {
 
     await expectLater(controller.checkVersion(), throwsA(isA<Object>()));
     expect(controller.state, isA<UpdateFailed>());
+  });
+
+  test("controller sends app-owned request headers for update downloads",
+      () async {
+    final fixture = await _ControllerHttpUpdateFixture.create();
+    try {
+      await HttpOverrides.runZoned(
+        () async {
+          final controller = DesktopUpdaterController(
+            appArchiveUrl: fixture.archiveUrl,
+            skipInitialVersionCheck: true,
+            requestHeadersProvider: (source) {
+              return {"x-update-auth": "runtime-token"};
+            },
+          );
+
+          try {
+            await controller.checkVersion();
+            await controller.downloadUpdate();
+          } on Object catch (error) {
+            fail(
+              "$error paths=${fixture.updatePaths} "
+              "headers=${fixture.authHeaders}",
+            );
+          }
+        },
+        createHttpClient: _RealHttpOverrides().createHttpClient,
+      );
+
+      expect(
+        fixture.authHeaders,
+        ["runtime-token", "runtime-token", "runtime-token"],
+      );
+      expect(fixture.updatePaths, [
+        "/app-archive.json",
+        "/release.json",
+        "/artifact.zip",
+      ]);
+    } finally {
+      await fixture.delete();
+    }
   });
 
   test("failed check exposes a problem report", () async {
@@ -180,6 +240,113 @@ void main() {
       expect(cleanupReport.cleanupSucceeded, isFalse);
       expect(cleanupReport.backupRestoredByNativeHelper, isNull);
       expect(cleanupReport.errorText, contains("Native install failed"));
+    } finally {
+      await fixture.delete();
+    }
+  });
+
+  test("downloadUpdate keeps mandatory policy after staging", () async {
+    final fixture = await _ControllerUpdateFixture.create(
+      mandatory: true,
+      validArtifact: true,
+    );
+    try {
+      final controller = DesktopUpdaterController(
+        appArchiveUrl: fixture.archiveUrl,
+        skipInitialVersionCheck: true,
+      );
+
+      await controller.checkVersion();
+      expect((controller.state as UpdateAvailable).mandatory, isTrue);
+
+      await controller.downloadUpdate();
+
+      final ready = controller.state as UpdateReadyToInstall;
+      expect(ready.stagingPath, isNotEmpty);
+      expect(ready.mandatory, isTrue);
+    } finally {
+      await fixture.delete();
+    }
+  });
+
+  test("freshInstall moves controller to fresh-install state", () async {
+    final openedUrls = <Uri>[];
+    final fixture = await _ControllerUpdateFixture.create(
+      mandatory: true,
+      freshInstall: true,
+    );
+    try {
+      final controller = DesktopUpdaterController(
+        appArchiveUrl: fixture.archiveUrl,
+        skipInitialVersionCheck: true,
+        externalUrlLauncher: (url) async {
+          openedUrls.add(url);
+        },
+      );
+
+      await controller.checkVersion();
+
+      final state = controller.state as UpdateFreshInstallRequired;
+      expect(state.mandatory, isTrue);
+      expect(state.freshInstall.message, "Install from a fresh download.");
+      expect(
+        state.freshInstall.downloadUrl.toString(),
+        "https://example.com/download/latest",
+      );
+      await expectLater(
+        controller.downloadUpdate(),
+        throwsStateError,
+      );
+
+      await controller.openFreshInstallDownload();
+      expect(
+          openedUrls.single.toString(), "https://example.com/download/latest");
+    } finally {
+      await fixture.delete();
+    }
+  });
+
+  test("supportPolicy past deadline moves controller to blocking state",
+      () async {
+    final fixture = await _ControllerUpdateFixture.create(
+      mandatory: false,
+      supportPolicy: true,
+      enforcedAfter: DateTime.utc(2000),
+    );
+    try {
+      final controller = DesktopUpdaterController(
+        appArchiveUrl: fixture.archiveUrl,
+        skipInitialVersionCheck: true,
+      );
+
+      await controller.checkVersion();
+
+      final state = controller.state as UpdateBlockedBySupportPolicy;
+      expect(state.supportPolicy.minimumSupportedVersion, "2.4.0");
+      expect(state.descriptor.version, "2.0.1");
+    } finally {
+      await fixture.delete();
+    }
+  });
+
+  test("supportPolicy before deadline keeps app usable with warning policy",
+      () async {
+    final fixture = await _ControllerUpdateFixture.create(
+      mandatory: false,
+      supportPolicy: true,
+      enforcedAfter: DateTime.utc(2999),
+    );
+    try {
+      final controller = DesktopUpdaterController(
+        appArchiveUrl: fixture.archiveUrl,
+        skipInitialVersionCheck: true,
+      );
+
+      await controller.checkVersion();
+
+      final state = controller.state as UpdateAvailable;
+      expect(state.supportPolicy?.minimumSupportedVersion, "2.4.0");
+      expect(state.mandatory, isFalse);
     } finally {
       await fixture.delete();
     }
@@ -795,6 +962,9 @@ class _ControllerUpdateFixture {
   static Future<_ControllerUpdateFixture> create({
     required bool mandatory,
     bool validArtifact = false,
+    bool supportPolicy = false,
+    DateTime? enforcedAfter,
+    bool freshInstall = false,
   }) async {
     final root = await Directory.systemTemp.createTemp(
       "updater_controller_",
@@ -825,6 +995,13 @@ class _ControllerUpdateFixture {
       "${const JsonEncoder.withIndent("  ").convert({
             "schemaVersion": 3,
             "appName": appName,
+            if (supportPolicy)
+              "supportPolicy": {
+                "minimumSupportedVersion": "2.4.0",
+                "enforcedAfter": (enforcedAfter ?? DateTime.utc(2999))
+                    .toUtc()
+                    .toIso8601String(),
+              },
             "items": [
               {
                 "version": "2.0.1",
@@ -832,6 +1009,11 @@ class _ControllerUpdateFixture {
                 "platform": Platform.operatingSystem,
                 "channel": "stable",
                 "mandatory": mandatory,
+                if (freshInstall)
+                  "freshInstall": {
+                    "downloadUrl": "https://example.com/download/latest",
+                    "message": "Install from a fresh download.",
+                  },
                 "release": releaseUrl.toString(),
               },
             ],
@@ -866,5 +1048,129 @@ class _ControllerUpdateFixture {
 
   Future<void> delete() async {
     await root.delete(recursive: true);
+  }
+}
+
+class _ControllerHttpUpdateFixture {
+  _ControllerHttpUpdateFixture._({
+    required this.root,
+    required this.server,
+    required this.archiveUrl,
+  });
+
+  final Directory root;
+  final HttpServer server;
+  final Uri archiveUrl;
+  final authHeaders = <String?>[];
+  final updatePaths = <String>[];
+
+  static Future<_ControllerHttpUpdateFixture> create() async {
+    final root = await Directory.systemTemp.createTemp(
+      "updater_controller_http_",
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final fixture = _ControllerHttpUpdateFixture._(
+      root: root,
+      server: server,
+      archiveUrl: Uri.parse(
+        "http://127.0.0.1:${server.port}/app-archive.json",
+      ),
+    );
+    await fixture._writeFiles();
+    fixture._serve();
+    return fixture;
+  }
+
+  Uri _url(String fileName) {
+    return Uri.parse("http://127.0.0.1:${server.port}/$fileName");
+  }
+
+  Future<void> _writeFiles() async {
+    final appName =
+        Platform.operatingSystem == "macos" ? "Example.app" : "Example";
+    final artifactBytes = ZipEncoder().encode(
+      Archive()
+        ..addFile(
+          ArchiveFile.string(
+            Platform.operatingSystem == "macos"
+                ? "$appName/Contents/Info.plist"
+                : "app.txt",
+            "version=2.0.1",
+          ),
+        ),
+    );
+    final artifact = File(path.join(root.path, "artifact.zip"));
+    await artifact.writeAsBytes(artifactBytes);
+    final artifactSha256 =
+        crypto.sha256.convert(await artifact.readAsBytes()).toString();
+
+    await File(path.join(root.path, "app-archive.json")).writeAsString(
+      "${const JsonEncoder.withIndent("  ").convert({
+            "schemaVersion": 3,
+            "appName": appName,
+            "items": [
+              {
+                "version": "2.0.1",
+                "buildNumber": 201,
+                "platform": Platform.operatingSystem,
+                "channel": "stable",
+                "mandatory": false,
+                "release": _url("release.json").toString(),
+              },
+            ],
+          })}\n",
+    );
+    await File(path.join(root.path, "release.json")).writeAsString(
+      "${const JsonEncoder.withIndent("  ").convert({
+            "schemaVersion": 3,
+            "packageId": "com.example.app",
+            "appName": appName,
+            "version": "2.0.1",
+            "buildNumber": 201,
+            "platform": Platform.operatingSystem,
+            "channel": "stable",
+            "artifact": {
+              "kind": "zip",
+              "url": _url("artifact.zip").toString(),
+              "sha256": artifactSha256,
+              "length": await artifact.length(),
+            },
+            "install": {"strategy": "wholeDirectoryReplace"},
+            "minimumUpdaterVersion": "2.0.0",
+            "generatedAt": DateTime.utc(2026, 6, 24).toIso8601String(),
+          })}\n",
+    );
+  }
+
+  void _serve() {
+    server.listen((request) async {
+      authHeaders.add(request.headers.value("x-update-auth"));
+      updatePaths.add(request.uri.path);
+
+      final relative = request.uri.pathSegments.join("/");
+      final file = File(path.join(root.path, relative));
+      if (!await file.exists()) {
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+        return;
+      }
+
+      request.response.headers.contentLength = await file.length();
+      await request.response.addStream(file.openRead());
+      await request.response.close();
+    });
+  }
+
+  Future<void> delete() async {
+    await server.close(force: true);
+    await root.delete(recursive: true);
+  }
+}
+
+class _RealHttpOverrides extends HttpOverrides {
+  @override
+  // ignore: unnecessary_overrides
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context);
   }
 }

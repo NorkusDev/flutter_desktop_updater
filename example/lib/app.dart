@@ -127,6 +127,10 @@ class _HomePageState extends State<HomePage> {
         _statusMessage = switch (result) {
           ManualUpdateCheckAvailable(:final descriptor) =>
             "Update ${descriptor.version} is available for ${descriptor.platform}.",
+          ManualUpdateCheckFreshInstallRequired(:final descriptor) =>
+            "Update ${descriptor.version} requires a fresh download.",
+          ManualUpdateCheckBlockedBySupportPolicy(:final descriptor) =>
+            "This version is no longer supported. Update ${descriptor.version} is required.",
           ManualUpdateCheckUpToDate() => "No matching 2.x update was found.",
           ManualUpdateCheckFailed(:final error) =>
             "Update check failed: $error",
@@ -368,6 +372,38 @@ class _CustomUpdateBanner extends StatelessWidget {
             ),
           ),
         ),
+      UpdateFreshInstallRequired(:final freshInstall, :final mandatory) =>
+        Card.outlined(
+          child: ListTile(
+            leading: const Icon(Icons.download_for_offline),
+            title: Text(
+              mandatory
+                  ? "Fresh download required"
+                  : "Fresh download available",
+            ),
+            subtitle: Text(
+              freshInstall.message ??
+                  "This update must be installed from a fresh download.",
+            ),
+            trailing: FilledButton(
+              onPressed: notifier.openFreshInstallDownload,
+              child: const Text("Download latest"),
+            ),
+          ),
+        ),
+      UpdateBlockedBySupportPolicy() => Card.outlined(
+          child: ListTile(
+            leading: const Icon(Icons.lock_clock),
+            title: const Text("Update required"),
+            subtitle: const Text(
+              "This version is no longer supported. Update to continue.",
+            ),
+            trailing: FilledButton(
+              onPressed: notifier.downloadUpdate,
+              child: const Text("Download"),
+            ),
+          ),
+        ),
       UpdateDownloading(:final receivedBytes, :final totalBytes) =>
         Card.outlined(
           child: Padding(
@@ -483,7 +519,8 @@ class _StateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currentState = state;
-    final canDownload = currentState is UpdateAvailable;
+    final canDownload = currentState is UpdateAvailable ||
+        currentState is UpdateBlockedBySupportPolicy;
     final canInstall = currentState is UpdateReadyToInstall;
     final checking = checkingForUpdates || currentState is UpdateChecking;
     final downloading = currentState is UpdateDownloading;
@@ -548,6 +585,12 @@ class _StateCard extends StatelessWidget {
       UpdateChecking() => "checking",
       UpdateAvailable(:final descriptor) =>
         "available ${descriptor.version} (${descriptor.platform})",
+      UpdateFreshInstallRequired(:final descriptor, :final mandatory) =>
+        "fresh install required ${descriptor.version}"
+            "${mandatory ? " (mandatory)" : ""}",
+      UpdateBlockedBySupportPolicy(:final descriptor, :final supportPolicy) =>
+        "blocked; update to ${descriptor.version}"
+            " before ${supportPolicy.enforcedAfter.toIso8601String()}",
       UpdateDownloading(:final receivedBytes, :final totalBytes) =>
         "downloading $receivedBytes / $totalBytes bytes",
       UpdateReadyToInstall(:final stagingPath) => "ready at $stagingPath",

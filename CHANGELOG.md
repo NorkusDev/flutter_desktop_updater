@@ -1,3 +1,89 @@
+## 2.4.3-dev.1
+
+* Previewed a Windows protected-directory install fix that treats
+  `C:\Program Files` and `C:\Program Files (x86)` app directories as requiring
+  UAC elevation when the app is launched by a non-admin user, even if a simple
+  write probe can create a temporary file there.
+* Documented the updated Windows UAC decision path for protected install roots,
+  writable per-user installs, and helper diagnostics.
+
+## 2.4.2
+
+* Extended `requestHeadersProvider` to hosted release notes loaded through
+  `releaseNotesUrl`, so private update hosts can use the same runtime-owned
+  headers for update metadata, artifacts, and release notes.
+
+## 2.4.1
+
+* Added customizable support-policy date formatting for localized ready-made
+  UI, with a default `YYYY-MM-DD HH:mm UTC` display.
+* Documented explicit locale loading such as `tr_TR`, including bundled locale
+  fallback and app-owned date formatting overrides.
+* Removed the default macOS CI runner from push/PR checks while keeping the
+  notarized macOS publish smoke as an opt-in workflow.
+
+## 2.4.0
+
+* Added ready-made updater UI localization loading from bundled package JSON,
+  app-owned JSON assets, direct string overrides, and app-owned resolver
+  callbacks.
+* Added bundled starter translations, automatic locale fallback, runtime
+  localization switching, and RTL text direction support for locales such as
+  Arabic and Hebrew.
+* Documented i18n setup with JSON schema guidance and screenshots for Arabic,
+  Hebrew, Japanese, Korean, and Cyrillic examples.
+
+## 2.3.7
+
+* Added `release publish` `additionalFiles` support for packaging app-owned
+  manuals, language packs, and other external files before platform signing,
+  notarization, pre-package hooks, and zip descriptor generation.
+* Added a packaged update policy guide and README summary for optional,
+  mandatory, support-policy, and fresh-install update modes.
+
+## 2.3.6
+
+* Exported `DesktopUpdaterController` and core public update result/version
+  types from `package:desktop_updater/desktop_updater.dart` so README quick
+  start examples work with a single package import.
+
+## 2.3.5
+
+* Added `requestHeadersProvider` so apps can attach runtime-owned HTTP headers
+  to private update host requests for `app-archive.json`, `release.json`, and
+  update artifact downloads.
+* Documented private update host authentication with a short README pointer and
+  detailed publishing guide coverage.
+
+## 2.3.4
+
+* Added `MandatoryReadyToInstallBehavior` for dialog-based mandatory update
+  flows so apps can choose the default `Save first` prompt or restart without an
+  extra confirmation.
+* Fixed `UpdateDialogListener` mandatory `Save first` handling so it dismisses
+  the modal update flow and lets the user return to the app to save work.
+
+## 2.3.3
+
+* Added mandatory ready-to-install UX that preserves mandatory state after staging and shows `Save first` plus `Restart`.
+* Added `supportPolicy` for minimum supported app versions with warning-before-deadline and blocking-after-deadline ready-made UI.
+* Added `freshInstall` metadata, ready-made fresh-install UI, external download launching, and release publish flags.
+* Added `release publish` help and validation for support-policy and fresh-install flags.
+
+## 2.3.2
+
+* Fixed Linux zip staging so Unix permission bits are restored from the update
+  archive, preserving executable bundle files before native relaunch.
+* Added a Linux native helper fallback that restores the target executable bit
+  after replacement and rolls back if relaunch would be impossible.
+* Documented Linux zip permission expectations for apps that produce update
+  artifacts outside `release publish`.
+
+## 2.3.1
+
+* Added `release publish --dart-define` support so build-time Dart environment
+  values are forwarded to `flutter build`.
+
 ## 2.3.0
 
 * Added optional release notes support for update UIs through `releaseNotesUrl`, `releaseNotesLoader`, `releaseNotesState`, and `loadReleaseNotes()`.

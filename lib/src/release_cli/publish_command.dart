@@ -20,7 +20,8 @@ ArgParser buildPublishParser() {
       "dart-define",
       splitCommas: false,
       valueHelp: "key=value",
-      help: "Forward a build-time environment value to flutter build.",
+      help: "Forward a build-time environment value to flutter build. "
+          "Repeat for multiple values.",
     )
     ..addMultiOption(
       "dart-define-from-file",
@@ -31,7 +32,29 @@ ArgParser buildPublishParser() {
     ..addFlag(
       "mandatory",
       negatable: false,
-      help: "Mark this release as mandatory in app-archive.json.",
+      help: "Mark this release as mandatory in app-archive.json. "
+          "Ready-made UI hides skip actions and keeps prompting until "
+          "installed.",
+    )
+    ..addOption(
+      "minimum-supported-version",
+      help: "Top-level supportPolicy minimum app version. Requires "
+          "--enforced-after.",
+    )
+    ..addOption(
+      "enforced-after",
+      help: "Top-level supportPolicy enforcement deadline as ISO-8601 UTC. "
+          "Requires --minimum-supported-version.",
+    )
+    ..addOption(
+      "fresh-install-url",
+      help: "Item-level freshInstall download URL. When present, ready-made "
+          "UI sends users to a fresh download instead of in-app install.",
+    )
+    ..addOption(
+      "fresh-install-message",
+      help: "Optional release-specific freshInstall explanation. Requires "
+          "--fresh-install-url.",
     )
     ..addFlag("notarize", negatable: false)
     ..addFlag("skip-build-for-test", negatable: false);
@@ -48,6 +71,24 @@ Future<int> runPublishCommand(
   }
 
   final platform = _required(results, "platform");
+  final minimumSupportedVersion =
+      results["minimum-supported-version"] as String?;
+  final enforcedAfterValue = results["enforced-after"] as String?;
+  if ((minimumSupportedVersion == null) != (enforcedAfterValue == null)) {
+    throw const FormatException(
+      "--minimum-supported-version and --enforced-after must be provided "
+      "together.",
+    );
+  }
+
+  final freshInstallUrlValue = results["fresh-install-url"] as String?;
+  final freshInstallMessage = results["fresh-install-message"] as String?;
+  if (freshInstallMessage != null && freshInstallUrlValue == null) {
+    throw const FormatException(
+      "--fresh-install-message requires --fresh-install-url.",
+    );
+  }
+
   final overrides = ReleasePublishOverrides(
     configPath: results["config"] as String?,
     baseUrl: results["base-url"] as String?,
@@ -64,6 +105,13 @@ Future<int> runPublishCommand(
       results["dart-define-from-file"] as List<String>,
     ),
     mandatory: results["mandatory"] as bool,
+    minimumSupportedVersion: minimumSupportedVersion,
+    enforcedAfter: enforcedAfterValue == null
+        ? null
+        : DateTime.parse(enforcedAfterValue).toUtc(),
+    freshInstallUrl:
+        freshInstallUrlValue == null ? null : Uri.parse(freshInstallUrlValue),
+    freshInstallMessage: freshInstallMessage,
     notarize: results["notarize"] as bool,
   );
   final publisher = ReleasePublisher(
