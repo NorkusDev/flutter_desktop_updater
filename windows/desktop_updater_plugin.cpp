@@ -513,6 +513,12 @@ bool ScheduleInstallAndRelaunch(const std::wstring& staging_path,
       << "Write-DiagnosticsEvent 'parent process exited'\n"
       << "$targetRoot = [IO.Path]::GetFullPath($target).TrimEnd('\\\\')\n"
       << "$targetRootWithSlash = $targetRoot + '\\'\n"
+      << "$stagingRoot = ''\n"
+      << "$stagingRootWithSlash = ''\n"
+      << "if (-not [string]::IsNullOrWhiteSpace($staging)) {\n"
+      << "  $stagingRoot = [IO.Path]::GetFullPath($staging).TrimEnd('\\\\')\n"
+      << "  $stagingRootWithSlash = $stagingRoot + '\\'\n"
+      << "}\n"
       << "function Get-NormalizedDirectory([string]$value) {\n"
       << "  if ([string]::IsNullOrWhiteSpace($value)) { return '' }\n"
       << "  try { return [IO.Path]::GetFullPath($value.Trim('\"')).TrimEnd('\\\\') } catch { return '' }\n"
@@ -552,6 +558,108 @@ bool ScheduleInstallAndRelaunch(const std::wstring& staging_path,
       << "    }\n"
       << "  }\n"
       << "}\n"
+      << "function Test-InstallerOwnedWindowsFile([string]$Name) {\n"
+      << "  if ([string]::IsNullOrWhiteSpace($Name)) { return $false }\n"
+      << "  return $Name -imatch '^unins[0-9][0-9][0-9]\\.(exe|dat|msg)$'\n"
+      << "}\n"
+      << "function Remove-StagingDirectoryWithRetry([string]$Path) {\n"
+      << "  if ([string]::IsNullOrWhiteSpace($Path)) { return }\n"
+      << "  Write-DiagnosticsEvent 'cleanup start'\n"
+      << "  if (-not (Test-Path -LiteralPath $Path)) {\n"
+      << "    Write-DiagnosticsEvent 'cleanup success'\n"
+      << "    return\n"
+      << "  }\n"
+      << "  $cleanupDeadline = (Get-Date).AddSeconds(30)\n"
+      << "  while ($true) {\n"
+      << "    try {\n"
+      << "      Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop\n"
+      << "      Write-DiagnosticsEvent 'cleanup success'\n"
+      << "      return\n"
+      << "    } catch {\n"
+      << "      if ((Get-Date) -gt $cleanupDeadline) {\n"
+      << "        Write-DiagnosticsEvent 'cleanup failure'\n"
+      << "        return\n"
+      << "      }\n"
+      << "      Write-DiagnosticsEvent 'cleanup retry'\n"
+      << "      Start-Sleep -Milliseconds 500\n"
+      << "    }\n"
+      << "  }\n"
+      << "}\n"
+      << "function Test-AuthenticodePolicy($installer, $Policy) {\n"
+      << "  if ($null -eq $Policy -or $Policy.required -ne $true) { return }\n"
+      << "  try {\n"
+      << "    $signature = Get-AuthenticodeSignature -FilePath $installer -ErrorAction Stop\n"
+      << "    if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) {\n"
+      << "      Write-DiagnosticsEvent 'inno authenticode failure'\n"
+      << "      throw 'Installer Authenticode signature is not valid.'\n"
+      << "    }\n"
+      << "    $certificateThumbprint = ([string]$signature.SignerCertificate.Thumbprint).ToUpperInvariant()\n"
+      << "    $sha256 = [Security.Cryptography.SHA256]::Create()\n"
+      << "    try {\n"
+      << "      $actual = [BitConverter]::ToString($sha256.ComputeHash($signature.SignerCertificate.GetRawCertData())).Replace('-', '').ToUpperInvariant()\n"
+      << "    } finally {\n"
+      << "      $sha256.Dispose()\n"
+      << "    }\n"
+      << "    $allowed = @($Policy.sha256Thumbprints | ForEach-Object { ([string]$_).ToUpperInvariant() })\n"
+      << "    if ($allowed.Count -gt 0 -and -not ($allowed -contains $actual)) {\n"
+      << "      Write-DiagnosticsEvent 'inno authenticode failure'\n"
+      << "      throw 'Installer Authenticode thumbprint is not trusted.'\n"
+      << "    }\n"
+      << "    Write-DiagnosticsEvent 'inno authenticode verified'\n"
+      << "  } catch {\n"
+      << "    Write-DiagnosticsEvent 'inno authenticode failure'\n"
+      << "    throw\n"
+      << "  }\n"
+      << "}\n"
+      << "function Invoke-InnoInstallerUpdate($Descriptor) {\n"
+      << "  $installer = Join-Path $staging 'installer.exe'\n"
+      << "  $installerPath = [IO.Path]::GetFullPath($installer)\n"
+      << "  if ([string]::IsNullOrWhiteSpace($stagingRootWithSlash) -or -not $installerPath.StartsWith($stagingRootWithSlash, [StringComparison]::OrdinalIgnoreCase)) {\n"
+      << "    throw 'Installer path escapes staging root.'\n"
+      << "  }\n"
+      << "  if (-not (Test-Path -LiteralPath $installerPath)) { throw 'Staged Inno installer is missing.' }\n"
+      << "  $installer = $installerPath\n"
+      << "  $inno = $Descriptor.install.inno\n"
+      << "  Test-AuthenticodePolicy -installer $installer -Policy $inno.authenticode\n"
+      << "  $logFileName = [string]$inno.logFileName\n"
+      << "  if ([string]::IsNullOrWhiteSpace($logFileName)) { $logFileName = 'desktop_updater_inno_install.log' }\n"
+      << "  $logPath = Join-Path ([IO.Path]::GetTempPath()) $logFileName\n"
+      << "  $args = New-Object System.Collections.Generic.List[string]\n"
+      << "  foreach ($arg in @($inno.silentArgs)) {\n"
+      << "    if (-not [string]::IsNullOrWhiteSpace($arg)) { [void]$args.Add([string]$arg) }\n"
+      << "  }\n"
+      << "  if ($inno.inheritInstallDirectory -eq $true) { [void]$args.Add('/DIR=' + $targetRoot) }\n"
+      << "  [void]$args.Add('/LOG=' + $logPath)\n"
+      << "  Write-DiagnosticsEvent 'inno installer start'\n"
+      << "  $process = Start-Process -FilePath $installer -ArgumentList $args.ToArray() -Wait -PassThru\n"
+      << "  if ($process.ExitCode -ne 0) {\n"
+      << "    Write-DiagnosticsEvent ('inno installer failure exitCode=' + $process.ExitCode)\n"
+      << "    throw ('Inno installer failed with exit code ' + $process.ExitCode)\n"
+      << "  }\n"
+      << "  Write-DiagnosticsEvent 'inno installer success'\n"
+      << "  Remove-StagingDirectoryWithRetry $stagingRoot\n"
+      << "  if ($inno.relaunchAfterInstall -eq $true -and $skipRelaunch -ne '1') {\n"
+      << "    Write-DiagnosticsEvent 'inno relaunch attempt'\n"
+      << "    Start-Process -WorkingDirectory $target -FilePath $exe\n"
+      << "  }\n"
+      << "  Remove-Item -LiteralPath $scriptSelf -Force -ErrorAction SilentlyContinue\n"
+      << "  exit 0\n"
+      << "}\n"
+      << "if (-not [string]::IsNullOrWhiteSpace($staging)) {\n"
+      << "  $manifest = Join-Path $staging '.desktop_updater_release_manifest.json'\n"
+      << "  if (Test-Path -LiteralPath $manifest) {\n"
+      << "    try {\n"
+      << "      $descriptor = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json\n"
+      << "      if ($descriptor.install.strategy -eq 'innoInstaller') {\n"
+      << "        Write-DiagnosticsEvent 'inno manifest loaded'\n"
+      << "        Invoke-InnoInstallerUpdate $descriptor\n"
+      << "      }\n"
+      << "    } catch {\n"
+      << "      Write-DiagnosticsEvent 'inno manifest failure'\n"
+      << "      throw\n"
+      << "    }\n"
+      << "  }\n"
+      << "}\n"
       << "$backup = Join-Path ([IO.Path]::GetTempPath()) "
          "('desktop_updater_backup_' + $pidToWait)\n"
       << "if (Test-Path -LiteralPath $backup) { "
@@ -585,7 +693,11 @@ bool ScheduleInstallAndRelaunch(const std::wstring& staging_path,
       << "    try {\n"
       << "      Write-DiagnosticsEvent 'move start'\n"
       << "      Get-ChildItem -LiteralPath $target -Force | ForEach-Object {\n"
-      << "        Remove-Item -LiteralPath $_.FullName -Recurse -Force\n"
+      << "        if ($_.PSIsContainer -or -not (Test-InstallerOwnedWindowsFile $_.Name)) {\n"
+      << "          Remove-Item -LiteralPath $_.FullName -Recurse -Force\n"
+      << "        } else {\n"
+      << "          Write-DiagnosticsEvent ('preserve installer file ' + $_.Name)\n"
+      << "        }\n"
       << "      }\n"
       << "      Get-ChildItem -LiteralPath $staging -Force | ForEach-Object {\n"
       << "        Copy-Item -LiteralPath $_.FullName -Destination $target -Recurse -Force\n"
@@ -623,13 +735,7 @@ bool ScheduleInstallAndRelaunch(const std::wstring& staging_path,
       << "      Start-Sleep -Seconds 1\n"
       << "    }\n"
       << "  }\n"
-      << "  Write-DiagnosticsEvent 'cleanup start'\n"
-      << "  try {\n"
-      << "    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop\n"
-      << "    Write-DiagnosticsEvent 'cleanup success'\n"
-      << "  } catch {\n"
-      << "    Write-DiagnosticsEvent 'cleanup failure'\n"
-      << "  }\n"
+      << "  Remove-StagingDirectoryWithRetry -Path $staging\n"
       << "}\n"
       << "Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue\n"
       << "} catch {\n"
@@ -823,6 +929,38 @@ bool IsKnownProtectedInstallDirectoryForTesting(
     }
   }
   return false;
+}
+
+bool IsInstallerOwnedWindowsFileForTesting(const std::wstring& file_name) {
+  const std::wstring name = fs::path(file_name).filename().wstring();
+  if (name.empty()) {
+    return false;
+  }
+
+  const size_t dot_position = name.rfind(L'.');
+  if (dot_position == std::wstring::npos) {
+    return false;
+  }
+
+  const std::wstring stem = name.substr(0, dot_position);
+  const std::wstring extension = name.substr(dot_position);
+  if (stem.size() != 8) {
+    return false;
+  }
+
+  if (_wcsnicmp(stem.c_str(), L"unins", 5) != 0) {
+    return false;
+  }
+
+  for (size_t index = 5; index < stem.size(); index += 1) {
+    if (stem[index] < L'0' || stem[index] > L'9') {
+      return false;
+    }
+  }
+
+  return _wcsicmp(extension.c_str(), L".exe") == 0 ||
+         _wcsicmp(extension.c_str(), L".dat") == 0 ||
+         _wcsicmp(extension.c_str(), L".msg") == 0;
 }
 
 // static

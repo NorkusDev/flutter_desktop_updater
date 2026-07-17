@@ -1,5 +1,7 @@
 import "dart:io";
 
+import "package:desktop_updater/src/release_cli/inno/inno_publish_config.dart";
+import "package:desktop_updater/src/release_cli/macos/macos_artifact_config.dart";
 import "package:path/path.dart" as path;
 import "package:yaml/yaml.dart";
 
@@ -50,6 +52,7 @@ class ReleasePublishConfig {
     required this.channel,
     required this.uploadProvider,
     required this.macos,
+    required this.windows,
     required this.hooks,
     required this.additionalFiles,
   });
@@ -59,6 +62,7 @@ class ReleasePublishConfig {
   final String channel;
   final UploadConfig uploadProvider;
   final MacOSPublishConfig macos;
+  final WindowsPublishConfig windows;
   final ReleaseHooksConfig hooks;
 
   /// Files copied into the platform release output before signing and zipping.
@@ -102,6 +106,7 @@ class ReleasePublishConfig {
         cliOverrides.channel ?? _stringValue(updates, "channel") ?? "stable";
     final provider = _readUploadProvider(document);
     final macos = _readMacOSConfig(document, cliOverrides);
+    final windows = _readWindowsConfig(document);
     final hooks = _readHooksConfig(document);
     final additionalFiles = _readAdditionalFilesConfig(document);
 
@@ -117,6 +122,7 @@ class ReleasePublishConfig {
       channel: channelValue,
       uploadProvider: provider,
       macos: macos,
+      windows: windows,
       hooks: hooks,
       additionalFiles: additionalFiles,
     );
@@ -150,6 +156,9 @@ class AdditionalReleaseFileConfig {
 class MacOSPublishConfig {
   const MacOSPublishConfig({
     required this.notarize,
+    required this.artifactKind,
+    required this.dmg,
+    required this.pkg,
     required this.staple,
     required this.gatekeeperAssess,
     this.developerIdApplication,
@@ -158,6 +167,9 @@ class MacOSPublishConfig {
   });
 
   final bool notarize;
+  final MacOSArtifactKind artifactKind;
+  final MacOSDmgPublishConfig dmg;
+  final MacOSPkgPublishConfig pkg;
   final String? developerIdApplication;
   final String? notaryProfile;
   final String? keychain;
@@ -479,10 +491,20 @@ MacOSPublishConfig _readMacOSConfig(
   ReleasePublishOverrides cliOverrides,
 ) {
   final macos = _mapValue(document, "macos");
+  final artifact = _mapValue(macos, "artifact");
+  final artifactKind = _readMacOSArtifactKind(
+    _stringValue(artifact, "kind") ?? "zip",
+  );
+  final appName = cliOverrides.appName ?? "App";
+  final dmg = _readMacOSDmgConfig(macos, appName);
+  final pkg = _readMacOSPkgConfig(macos);
   final notarize = cliOverrides.notarize ||
       (_boolValue(macos, "notarize", displayName: "macos.notarize") ?? false);
   final config = MacOSPublishConfig(
     notarize: notarize,
+    artifactKind: artifactKind,
+    dmg: dmg,
+    pkg: pkg,
     developerIdApplication: _stringValue(macos, "developerIdApplication"),
     notaryProfile: _stringValue(macos, "notaryProfile"),
     keychain: _stringValue(macos, "keychain"),
@@ -504,7 +526,146 @@ MacOSPublishConfig _readMacOSConfig(
     _requireConfigValue(config.keychain, "macos.keychain");
   }
 
+  if (config.artifactKind == MacOSArtifactKind.pkg &&
+      config.pkg.packageIdentifier.trim().isEmpty) {
+    throw const FormatException(
+      "macos.pkg.packageIdentifier is required when macos.artifact.kind is pkg.",
+    );
+  }
+  if (config.artifactKind == MacOSArtifactKind.pkg &&
+      (config.pkg.signingIdentifier == null ||
+          config.pkg.signingIdentifier!.trim().isEmpty)) {
+    throw const FormatException(
+      "macos.pkg.signingIdentifier is required when macos.artifact.kind is pkg.",
+    );
+  }
+  if (config.artifactKind == MacOSArtifactKind.pkg && !config.notarize) {
+    throw const FormatException(
+      "macos.notarize: true is required when macos.artifact.kind is pkg.",
+    );
+  }
+  if (config.artifactKind == MacOSArtifactKind.pkg && !config.staple) {
+    throw const FormatException(
+      "macos.staple must be true when macos.artifact.kind is pkg.",
+    );
+  }
+
   return config;
+}
+
+MacOSArtifactKind _readMacOSArtifactKind(String kind) {
+  switch (kind) {
+    case "zip":
+      return MacOSArtifactKind.zip;
+    case "dmg":
+      return MacOSArtifactKind.dmg;
+    case "pkg":
+      return MacOSArtifactKind.pkg;
+  }
+  throw const FormatException("macos.artifact.kind must be zip, dmg, or pkg.");
+}
+
+MacOSDmgPublishConfig _readMacOSDmgConfig(
+  Map<String, dynamic> macos,
+  String appName,
+) {
+  final defaults = MacOSDmgPublishConfig.defaultsForAppName(appName);
+  final dmg = _mapValue(macos, "dmg");
+  final explicitAppBundleName = _stringValue(dmg, "appBundleName");
+  final appBundleName = explicitAppBundleName ?? defaults.appBundleName;
+  final explicitVolumeName = _stringValue(dmg, "volumeName");
+  return MacOSDmgPublishConfig(
+    volumeName: explicitVolumeName ?? _macOSAppNameStem(appBundleName),
+    appBundleName: appBundleName,
+    applicationsAlias: _boolValue(
+          dmg,
+          "applicationsAlias",
+          displayName: "macos.dmg.applicationsAlias",
+        ) ??
+        defaults.applicationsAlias,
+    usesDefaultVolumeName: explicitVolumeName == null,
+    usesDefaultAppBundleName: explicitAppBundleName == null,
+  );
+}
+
+MacOSPkgPublishConfig _readMacOSPkgConfig(Map<String, dynamic> macos) {
+  final pkg = _mapValue(macos, "pkg");
+  return MacOSPkgPublishConfig(
+    packageIdentifier: _stringValue(pkg, "packageIdentifier") ?? "",
+    installLocation: _stringValue(pkg, "installLocation") ?? "/Applications",
+    signingIdentifier: _stringValue(pkg, "signingIdentifier"),
+  );
+}
+
+String _macOSAppNameStem(String appBundleName) {
+  var stem = path.basename(appBundleName);
+  if (stem.endsWith(".app")) {
+    stem = stem.substring(0, stem.length - ".app".length);
+  }
+  return stem;
+}
+
+WindowsPublishConfig _readWindowsConfig(Map<String, dynamic> document) {
+  final windows = _mapValue(document, "windows");
+  final installer = _mapValue(windows, "installer");
+  if (installer.isEmpty) {
+    return const WindowsPublishConfig();
+  }
+  final kind = _stringValue(installer, "kind") ?? "";
+  if (kind != "inno") {
+    throw const FormatException("windows.installer.kind must be inno.");
+  }
+  final config = InnoPublishConfig(
+    kind: kind,
+    mode: _stringValue(installer, "mode") ?? "generated",
+    script: _stringValue(installer, "script"),
+    isccPath: _stringValue(installer, "isccPath"),
+    outputBaseName: _stringValue(installer, "outputBaseName"),
+    appId: _stringValue(installer, "appId"),
+    publisher: _stringValue(installer, "publisher"),
+    publisherUrl: _stringValue(installer, "publisherUrl"),
+    supportUrl: _stringValue(installer, "supportUrl"),
+    updatesUrl: _stringValue(installer, "updatesUrl"),
+    privilegesRequired:
+        _stringValue(installer, "privilegesRequired") ?? "lowest",
+    architecturesAllowed:
+        _stringValue(installer, "architecturesAllowed") ?? "x64",
+    architecturesInstallIn64BitMode:
+        _stringValue(installer, "architecturesInstallIn64BitMode") ?? "x64",
+    setupIcon: _stringValue(installer, "setupIcon"),
+    licenseFile: _stringValue(installer, "licenseFile"),
+    silentArgs: _stringListValue(installer, "silentArgs") ??
+        const ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+    requiresElevation: _stringValue(installer, "requiresElevation") ?? "auto",
+    authenticodeThumbprints:
+        _stringListValue(installer, "authenticodeThumbprints") ?? const [],
+  );
+  _validateInnoConfig(config);
+  return WindowsPublishConfig(installer: config);
+}
+
+void _validateInnoConfig(InnoPublishConfig config) {
+  if (!const ["generated", "script"].contains(config.mode)) {
+    throw const FormatException(
+      "windows.installer.mode must be generated or script.",
+    );
+  }
+  if (config.mode == "script" &&
+      (config.script == null || config.script!.trim().isEmpty)) {
+    throw const FormatException(
+      "windows.installer.script is required when mode is script.",
+    );
+  }
+  if (!const ["admin", "lowest"].contains(config.privilegesRequired)) {
+    throw const FormatException(
+      "windows.installer.privilegesRequired must be admin or lowest.",
+    );
+  }
+  if (!const ["auto", "always", "never"].contains(config.requiresElevation)) {
+    throw const FormatException(
+      "windows.installer.requiresElevation must be auto, always, or never.",
+    );
+  }
 }
 
 Uri _normalizeBaseUrl(String value) {
@@ -559,6 +720,17 @@ Map<String, dynamic> _mapValue(Map<String, dynamic> map, String key) {
 String? _stringValue(Map<String, dynamic> map, String key) {
   final value = map[key];
   return value?.toString();
+}
+
+List<String>? _stringListValue(Map<String, dynamic> map, String key) {
+  final value = map[key];
+  if (value == null) {
+    return null;
+  }
+  if (value is! List) {
+    throw FormatException("$key must be a list.");
+  }
+  return List.unmodifiable([for (final entry in value) entry.toString()]);
 }
 
 String _requiredString(

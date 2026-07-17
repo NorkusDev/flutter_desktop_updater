@@ -60,12 +60,23 @@ jobs:
       - name: Run update smoke
         working-directory: example
         run: dart run tool/updater_smoke.dart --diagnostics-log ../reports/windows-update-smoke-debug-diagnostics.jsonl
+      - name: Windows Inno update smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tool/windows_inno_smoke.ps1
       - name: Upload update smoke diagnostics
         if: ${{ failure() || vars.DESKTOP_UPDATER_UPLOAD_SMOKE_DIAGNOSTICS == '1' }}
         uses: actions/upload-artifact@v4
         with:
           name: windows-update-smoke-debug-diagnostics
           path: reports/windows-update-smoke-debug-diagnostics.jsonl
+          if-no-files-found: ignore
+      - name: Upload Windows Inno update smoke diagnostics
+        if: ${{ failure() || vars.DESKTOP_UPDATER_UPLOAD_SMOKE_DIAGNOSTICS == '1' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-inno-update-smoke-diagnostics
+          path: reports/windows-inno-update-smoke-diagnostics.jsonl
           if-no-files-found: ignore
       - name: Build example release
         working-directory: example
@@ -97,6 +108,10 @@ jobs:
     name: macOS Notarized Publish
     runs-on: macos-latest
     if: github.event_name == 'workflow_dispatch' && vars.DESKTOP_UPDATER_RUN_NOTARIZED_PUBLISH_E2E == '1'
+    # The full DMG/PKG production smoke is local/manual unless a future
+    # workflow_dispatch lane explicitly configures Developer ID Application,
+    # Developer ID Installer, and notary credentials:
+    # dart run tool/macos_production_smoke.dart all --cleanup
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2

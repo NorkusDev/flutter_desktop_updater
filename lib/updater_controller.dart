@@ -616,6 +616,8 @@ class DesktopUpdaterController extends ChangeNotifier {
         version: descriptor.version,
         channel: descriptor.channel,
         platform: descriptor.platform,
+        artifactKind: descriptor.artifact.kind,
+        installStrategy: descriptor.install.strategy,
       ),
     );
     notifyListeners();
@@ -667,6 +669,8 @@ class DesktopUpdaterController extends ChangeNotifier {
           version: descriptor.version,
           channel: descriptor.channel,
           platform: descriptor.platform,
+          artifactKind: descriptor.artifact.kind,
+          installStrategy: descriptor.install.strategy,
           error: error,
         ),
       );
@@ -695,6 +699,8 @@ class DesktopUpdaterController extends ChangeNotifier {
         version: _activeDescriptor?.version,
         channel: _activeDescriptor?.channel,
         platform: _activeDescriptor?.platform,
+        artifactKind: _activeDescriptor?.artifact.kind,
+        installStrategy: _activeDescriptor?.install.strategy,
       ),
     );
     notifyListeners();
@@ -745,6 +751,8 @@ class DesktopUpdaterController extends ChangeNotifier {
           version: _activeDescriptor?.version,
           channel: _activeDescriptor?.channel,
           platform: _activeDescriptor?.platform,
+          artifactKind: _activeDescriptor?.artifact.kind,
+          installStrategy: _activeDescriptor?.install.strategy,
           error: error,
         ),
       );

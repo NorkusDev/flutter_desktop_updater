@@ -2,8 +2,11 @@ import "dart:convert";
 import "dart:io";
 
 import "package:desktop_updater/src/core/release_descriptor.dart";
+import "package:desktop_updater/src/core/macos_distribution_artifacts.dart";
 import "package:desktop_updater/src/core/update_client.dart";
 import "package:desktop_updater/src/io/update_transport.dart";
+import "package:desktop_updater/src/release_manifest.dart"
+    show sha256File, stagedReleaseManifestFileName;
 import "package:desktop_updater/src/version_info.dart";
 import "package:flutter_test/flutter_test.dart";
 import "package:path/path.dart" as path;
@@ -263,6 +266,188 @@ void main() {
     expect(transport.downloadedSources, isEmpty);
   });
 
+  test("stages Windows Inno installer artifacts without extracting zip",
+      () async {
+    final root = await Directory.systemTemp.createTemp("inno_stage_");
+    addTearDown(() async {
+      if (await root.exists()) {
+        await root.delete(recursive: true);
+      }
+    });
+
+    final artifact = File(path.join(root.path, "setup.exe"));
+    await artifact.writeAsBytes([1, 2, 3, 4]);
+    final descriptor = _descriptor(
+      platform: "windows",
+      artifactKind: "innoInstaller",
+      artifactUrl: artifact.uri,
+      artifactSha256: await sha256File(artifact),
+      artifactLength: await artifact.length(),
+      install: const ReleaseInstall(
+        strategy: "innoInstaller",
+        inno: ReleaseInnoInstall(
+          silentArgs: ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+          inheritInstallDirectory: true,
+          logFileName: "desktop_updater_inno_install.log",
+          relaunchAfterInstall: true,
+          requiresElevation: "auto",
+          authenticode: ReleaseAuthenticodePolicy(required: false),
+        ),
+      ),
+    );
+
+    final client = UpdateClient(
+      appArchiveUrl: Uri.parse("https://updates.example.com/app-archive.json"),
+      currentVersion: DesktopVersionInfo.parse("1.0.0"),
+      platform: "windows",
+      stagingParent: root,
+    );
+
+    final staged = await client.downloadVerifyAndStage(descriptor: descriptor);
+
+    expect(
+      File(path.join(staged.stagingPath, "installer.exe")).existsSync(),
+      isTrue,
+    );
+    expect(
+      File(path.join(staged.stagingPath, stagedReleaseManifestFileName))
+          .existsSync(),
+      isTrue,
+    );
+    expect(
+        File(path.join(staged.stagingPath, "setup.exe")).existsSync(), isFalse);
+  });
+
+  test("stages macOS DMG artifacts as verified app bundles", () async {
+    final root = await Directory.systemTemp.createTemp("dmg_stage_");
+    addTearDown(() async {
+      if (await root.exists()) {
+        await root.delete(recursive: true);
+      }
+    });
+
+    final dmg = File(path.join(root.path, "Example.dmg"));
+    await dmg.writeAsBytes([1, 2, 3, 4]);
+    final descriptor = _descriptor(
+      platform: "macos",
+      artifactKind: "dmg",
+      artifactUrl: dmg.uri,
+      artifactSha256: await sha256File(dmg),
+      artifactLength: await dmg.length(),
+      minimumUpdaterVersion: "2.6.0",
+      install: const ReleaseInstall(
+        strategy: "wholeBundleReplace",
+        macosDmg: ReleaseMacOSDmgInstall(
+          appBundleName: "Example.app",
+          verifyPrimarySignature: true,
+        ),
+      ),
+    );
+
+    final client = UpdateClient(
+      appArchiveUrl: Uri.parse("https://updates.example.com/app-archive.json"),
+      currentVersion: DesktopVersionInfo.parse("1.0.0"),
+      currentUpdaterVersion: DesktopVersionInfo.parse("2.6.0"),
+      platform: "macos",
+      stagingParent: root,
+      macosDistributionVerifier: const _FakeMacOSDistributionVerifier(
+        copiedAppName: "Example.app",
+      ),
+    );
+
+    final staged = await client.downloadVerifyAndStage(descriptor: descriptor);
+
+    expect(staged.stagingPath, endsWith("Example.app"));
+    expect(
+      File(
+        path.join(
+          Directory(staged.stagingPath).parent.path,
+          stagedReleaseManifestFileName,
+        ),
+      ).existsSync(),
+      isTrue,
+    );
+  });
+
+  test("stages macOS PKG installer artifacts without extracting", () async {
+    final root = await Directory.systemTemp.createTemp("pkg_stage_");
+    addTearDown(() async {
+      if (await root.exists()) {
+        await root.delete(recursive: true);
+      }
+    });
+
+    final pkg = File(path.join(root.path, "Example.pkg"));
+    await pkg.writeAsBytes([4, 3, 2, 1]);
+    final descriptor = _descriptor(
+      platform: "macos",
+      artifactKind: "pkgInstaller",
+      artifactUrl: pkg.uri,
+      artifactSha256: await sha256File(pkg),
+      artifactLength: await pkg.length(),
+      minimumUpdaterVersion: "2.6.0",
+      install: const ReleaseInstall(
+        strategy: "pkgInstaller",
+        macosPkg: ReleaseMacOSPkgInstall(
+          launchMode: "installerApp",
+          expectedPackageIds: ["com.example.app.pkg"],
+          relaunchAfterInstall: false,
+        ),
+      ),
+    );
+
+    final client = UpdateClient(
+      appArchiveUrl: Uri.parse("https://updates.example.com/app-archive.json"),
+      currentVersion: DesktopVersionInfo.parse("1.0.0"),
+      currentUpdaterVersion: DesktopVersionInfo.parse("2.6.0"),
+      platform: "macos",
+      stagingParent: root,
+      macosDistributionVerifier: const _FakeMacOSDistributionVerifier(),
+    );
+
+    final staged = await client.downloadVerifyAndStage(descriptor: descriptor);
+
+    expect(
+      File(path.join(staged.stagingPath, "installer.pkg")).existsSync(),
+      isTrue,
+    );
+    expect(
+      File(path.join(staged.stagingPath, stagedReleaseManifestFileName))
+          .existsSync(),
+      isTrue,
+    );
+  });
+
+  test("rejects Inno installer staging on non-Windows platforms", () async {
+    final root = await Directory.systemTemp.createTemp("inno_stage_linux_");
+    addTearDown(() async {
+      if (await root.exists()) {
+        await root.delete(recursive: true);
+      }
+    });
+
+    final artifact = File(path.join(root.path, "setup.exe"));
+    await artifact.writeAsBytes([1, 2, 3, 4]);
+    final descriptor = _innoDescriptorForTest(
+      artifactUrl: artifact.uri,
+      sha256: await sha256File(artifact),
+      length: await artifact.length(),
+    );
+
+    final client = UpdateClient(
+      appArchiveUrl: Uri.parse("https://updates.example.com/app-archive.json"),
+      currentVersion: DesktopVersionInfo.parse("1.0.0"),
+      currentUpdaterVersion: DesktopVersionInfo.parse("2.5.0"),
+      platform: "linux",
+      stagingParent: root,
+    );
+
+    await expectLater(
+      client.downloadVerifyAndStage(descriptor: descriptor),
+      throwsA(isA<UnsupportedError>()),
+    );
+  });
+
   test("skips descriptors when minimum OS policy rejects the platform",
       () async {
     final archiveUrl =
@@ -341,6 +526,11 @@ String _descriptorJson({
 
 ReleaseDescriptor _descriptor({
   required Uri artifactUrl,
+  String platform = "macos",
+  String artifactKind = "zip",
+  String? artifactSha256,
+  int? artifactLength,
+  ReleaseInstall install = const ReleaseInstall(strategy: "wholeBundleReplace"),
   String minimumUpdaterVersion = "2.0.0",
   Map<String, String> minimumOS = const {},
 }) {
@@ -350,18 +540,44 @@ ReleaseDescriptor _descriptor({
     appName: "Example",
     version: "2.1.0",
     buildNumber: 210,
-    platform: "macos",
+    platform: platform,
     channel: "stable",
     artifact: ReleaseArtifact(
-      kind: "zip",
+      kind: artifactKind,
       url: artifactUrl,
-      sha256: "a" * 64,
-      length: 12,
+      sha256: artifactSha256 ?? "a" * 64,
+      length: artifactLength ?? 12,
     ),
-    install: const ReleaseInstall(strategy: "wholeBundleReplace"),
+    install: install,
     minimumUpdaterVersion: minimumUpdaterVersion,
     minimumOS: minimumOS,
     generatedAt: DateTime.utc(2026, 6, 13),
+  );
+}
+
+ReleaseDescriptor _innoDescriptorForTest({
+  required Uri artifactUrl,
+  required String sha256,
+  required int length,
+}) {
+  return _descriptor(
+    platform: "windows",
+    artifactKind: "innoInstaller",
+    artifactUrl: artifactUrl,
+    artifactSha256: sha256,
+    artifactLength: length,
+    minimumUpdaterVersion: "2.5.0",
+    install: const ReleaseInstall(
+      strategy: "innoInstaller",
+      inno: ReleaseInnoInstall(
+        silentArgs: ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+        inheritInstallDirectory: true,
+        logFileName: "desktop_updater_inno_install.log",
+        relaunchAfterInstall: true,
+        requiresElevation: "auto",
+        authenticode: ReleaseAuthenticodePolicy(required: false),
+      ),
+    ),
   );
 }
 
@@ -387,6 +603,42 @@ class _MapUpdateTransport implements UpdateTransport {
     await destination.writeAsString(response);
     onProgress?.call(response.length, response.length);
   }
+}
+
+class _FakeMacOSDistributionVerifier extends MacOSDistributionVerifier {
+  const _FakeMacOSDistributionVerifier({this.copiedAppName});
+
+  final String? copiedAppName;
+
+  @override
+  Future<T> withMountedVerifiedDmg<T>({
+    required File dmg,
+    required bool verifyPrimarySignature,
+    required Future<T> Function(MountedDmg mounted) body,
+  }) {
+    return body(
+      MountedDmg(imagePath: dmg.path, mountPoint: "/Volumes/Example"),
+    );
+  }
+
+  @override
+  Future<Directory> copyAppFromMountedDmg({
+    required MountedDmg mounted,
+    required String appBundleName,
+    required Directory destinationParent,
+  }) async {
+    final app = Directory(
+      path.join(destinationParent.path, copiedAppName ?? appBundleName),
+    );
+    await app.create(recursive: true);
+    return app;
+  }
+
+  @override
+  Future<void> verifyPkgInstaller({
+    required File pkg,
+    required List<String> expectedPackageIds,
+  }) async {}
 }
 
 class _UpdateFixture {

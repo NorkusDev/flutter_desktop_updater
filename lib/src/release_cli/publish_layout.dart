@@ -47,9 +47,13 @@ class PublishLayout {
     required String version,
     required String platform,
     required String appName,
+    String artifactExtension = ".zip",
+    String artifactSuffix = "",
+    String? artifactFileName,
   }) {
     final normalizedBaseUrl = _normalizeBaseUrl(baseUrl);
-    final artifactName = "${_artifactNameStem(appName)}-$version-$platform.zip";
+    final artifactName = artifactFileName ??
+        "${_artifactNameStem(appName)}-$version-$platform$artifactSuffix$artifactExtension";
     final releaseRelativePath = path.posix.join(
       "releases",
       version,

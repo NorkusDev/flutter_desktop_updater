@@ -3,6 +3,12 @@ import "dart:io";
 
 import "package:desktop_updater/src/core/release_descriptor.dart";
 import "package:desktop_updater/src/package/release_packager.dart";
+import "package:desktop_updater/src/release_cli/inno/inno_installer_packager.dart";
+import "package:desktop_updater/src/release_cli/inno/inno_publish_config.dart";
+import "package:desktop_updater/src/release_cli/macos/dmg_packager.dart";
+import "package:desktop_updater/src/release_cli/macos/macos_artifact_config.dart";
+import "package:desktop_updater/src/release_cli/macos/pkg_packager.dart";
+import "package:desktop_updater/src/release_cli/publish_manifest.dart";
 import "package:desktop_updater/src/release_cli/release_publish_config.dart";
 import "package:desktop_updater/src/release_cli/release_publisher.dart";
 import "package:flutter_test/flutter_test.dart";
@@ -158,6 +164,184 @@ void main() {
     });
   }
 
+  test("macOS publish keeps .app bundle name in release descriptor", () async {
+    final root = await _createFixture("macos");
+    final commands = <String>[];
+    final packager = _RecordingPackager(commands);
+    try {
+      final publisher = ReleasePublisher(
+        skipBuild: true,
+        packager: packager,
+      );
+
+      await publisher.publish(
+        projectRoot: root,
+        platform: "macos",
+        overrides: const ReleasePublishOverrides(),
+        output: StringBuffer(),
+      );
+
+      expect(packager.requests, hasLength(1));
+      expect(packager.requests.single.appName, "Egas Manager.app");
+      expect(
+        packager.requests.single.artifactUrl.toString(),
+        "https://updates.example.com/releases/2.1.0/macos/"
+        "Egas%20Manager-2.1.0-macos.zip",
+      );
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
+
+  test("windows publish uses Inno installer package when configured", () async {
+    final root = await _createWindowsFixture();
+    final output = StringBuffer();
+    final innoPackager = _FakeInnoPackager();
+    final publisher = ReleasePublisher(
+      skipBuild: true,
+      packager: _RecordingPackager(<String>[]),
+      innoPackager: innoPackager,
+    );
+    await File(path.join(root.path, "desktop_updater.yaml")).writeAsString("""
+updates:
+  baseUrl: https://updates.example.com/
+windows:
+  installer:
+    kind: inno
+    mode: generated
+    appId: com.example.app
+    outputBaseName: CustomSetup
+""");
+    try {
+      final manifest = await publisher.publish(
+        projectRoot: root,
+        platform: "windows",
+        overrides: const ReleasePublishOverrides(),
+        output: output,
+      );
+
+      expect(manifest.artifact.kind, "innoInstaller");
+      expect(manifest.artifact.path, "releases/2.1.0/windows/CustomSetup.exe");
+      expect(
+        manifest.artifact.url.toString(),
+        "https://updates.example.com/releases/2.1.0/windows/CustomSetup.exe",
+      );
+      expect(
+        innoPackager.requests.single.artifactUrl.toString(),
+        "https://updates.example.com/releases/2.1.0/windows/CustomSetup.exe",
+      );
+      expect(innoPackager.requests.single.minimumUpdaterVersion, "2.5.0");
+      expect(innoPackager.outputBaseNames.single, "CustomSetup");
+      final writtenManifest = await PublishManifest.readFrom(
+        File(
+          path.join(
+            root.path,
+            "dist",
+            "desktop_updater",
+            ".desktop_updater_publish.json",
+          ),
+        ),
+      );
+      expect(
+        writtenManifest.artifact.path,
+        "releases/2.1.0/windows/CustomSetup.exe",
+      );
+      expect(
+        writtenManifest.artifact.url.toString(),
+        "https://updates.example.com/releases/2.1.0/windows/CustomSetup.exe",
+      );
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
+
+  test("macOS publish uses DMG packager when configured", () async {
+    final root = await _createFixture("macos");
+    final output = StringBuffer();
+    final dmgPackager = _FakeDmgPackager();
+    final zipPackager = _RecordingPackager(<String>[]);
+    await File(path.join(root.path, "desktop_updater.yaml")).writeAsString("""
+updates:
+  baseUrl: https://updates.example.com/
+macos:
+  artifact:
+    kind: dmg
+""");
+    try {
+      final publisher = ReleasePublisher(
+        skipBuild: true,
+        packager: zipPackager,
+        dmgPackager: dmgPackager,
+      );
+
+      final manifest = await publisher.publish(
+        projectRoot: root,
+        platform: "macos",
+        overrides: const ReleasePublishOverrides(),
+        output: output,
+      );
+
+      expect(zipPackager.requests, isEmpty);
+      expect(dmgPackager.requests, hasLength(1));
+      expect(dmgPackager.configs.single.volumeName, "Egas Manager");
+      expect(dmgPackager.configs.single.appBundleName, "Egas Manager.app");
+      expect(dmgPackager.requests.single.installStrategy, "wholeBundleReplace");
+      expect(dmgPackager.requests.single.minimumUpdaterVersion, "2.6.0");
+      expect(manifest.artifact.kind, "dmg");
+      expect(manifest.artifact.path, endsWith(".dmg"));
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
+
+  test("macOS publish uses PKG packager when configured", () async {
+    final root = await _createFixture("macos");
+    final output = StringBuffer();
+    final pkgPackager = _FakePkgPackager();
+    final zipPackager = _RecordingPackager(<String>[]);
+    await File(path.join(root.path, "desktop_updater.yaml")).writeAsString("""
+updates:
+  baseUrl: https://updates.example.com/
+macos:
+  notarize: true
+  developerIdApplication: "Developer ID Application: Example Corp (TEAMID1234)"
+  notaryProfile: desktop-updater-notary
+  keychain: /Users/me/Library/Keychains/login.keychain-db
+  artifact:
+    kind: pkg
+  pkg:
+    packageIdentifier: com.example.app.pkg
+    installLocation: /Applications
+    signingIdentifier: "Developer ID Installer: Example Corp (TEAMID1234)"
+""");
+    try {
+      final publisher = ReleasePublisher(
+        skipBuild: true,
+        packager: zipPackager,
+        pkgPackager: pkgPackager,
+        runProcess: _fakeMacOSNotarizationProcess,
+      );
+
+      final manifest = await publisher.publish(
+        projectRoot: root,
+        platform: "macos",
+        overrides: const ReleasePublishOverrides(),
+        output: output,
+      );
+
+      expect(zipPackager.requests, isEmpty);
+      expect(pkgPackager.requests, hasLength(1));
+      expect(
+          pkgPackager.configs.single.packageIdentifier, "com.example.app.pkg");
+      expect(pkgPackager.requests.single.installStrategy, "pkgInstaller");
+      expect(pkgPackager.requests.single.minimumUpdaterVersion, "2.6.0");
+      expect(manifest.artifact.kind, "pkgInstaller");
+      expect(manifest.artifact.path, endsWith(".pkg"));
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
+
   test("release hooks run around packaging with environment contract",
       () async {
     final root = await _createHookFixture();
@@ -305,9 +489,11 @@ class _RecordingPackager implements ReleasePackager {
   _RecordingPackager(this.commands);
 
   final List<String> commands;
+  final List<ReleasePackageRequest> requests = [];
 
   @override
   Future<ReleasePackageResult> package(ReleasePackageRequest request) async {
+    requests.add(request);
     commands.add("PACKAGE ${request.input.path}");
     await request.outputDirectory.create(recursive: true);
     final artifact = File(
@@ -341,4 +527,195 @@ class _RecordingPackager implements ReleasePackager {
       descriptor: descriptor,
     );
   }
+}
+
+class _FakeInnoPackager extends InnoInstallerPackager {
+  _FakeInnoPackager();
+
+  final List<ReleasePackageRequest> requests = [];
+  final List<String?> outputBaseNames = [];
+
+  @override
+  Future<ReleasePackageResult> package(
+    ReleasePackageRequest request, {
+    required InnoPublishConfig config,
+    String? outputBaseName,
+  }) async {
+    requests.add(request);
+    outputBaseNames.add(outputBaseName);
+    await request.outputDirectory.create(recursive: true);
+    final artifactName = outputBaseName == null
+        ? "Egas-Manager-2.1.0-windows.exe"
+        : "$outputBaseName.exe";
+    final artifact = File(
+      path.join(request.outputDirectory.path, artifactName),
+    );
+    await artifact.writeAsString("exe");
+    final release =
+        File(path.join(request.outputDirectory.path, "release.json"));
+    final descriptor = ReleaseDescriptor(
+      schemaVersion: 3,
+      packageId: request.packageId,
+      appName: request.appName,
+      version: request.version,
+      buildNumber: request.buildNumber,
+      platform: request.platform,
+      channel: request.channel,
+      artifact: ReleaseArtifact(
+        kind: "innoInstaller",
+        url: request.artifactUrl,
+        sha256: "b" * 64,
+        length: await artifact.length(),
+      ),
+      install: const ReleaseInstall(
+        strategy: "innoInstaller",
+        inno: ReleaseInnoInstall(
+          silentArgs: ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+          inheritInstallDirectory: true,
+          logFileName: "desktop_updater_inno_install.log",
+          relaunchAfterInstall: true,
+          requiresElevation: "auto",
+          authenticode: ReleaseAuthenticodePolicy(required: false),
+        ),
+      ),
+      minimumUpdaterVersion: request.minimumUpdaterVersion,
+      generatedAt: DateTime.utc(2026, 6, 12),
+    );
+    await release.writeAsString(
+      const JsonEncoder.withIndent("  ").convert(descriptor.toJson()),
+    );
+    return ReleasePackageResult(
+      artifact: artifact,
+      releaseFile: release,
+      descriptor: descriptor,
+    );
+  }
+}
+
+class _FakeDmgPackager extends DmgPackager {
+  _FakeDmgPackager();
+
+  final List<ReleasePackageRequest> requests = [];
+  final List<MacOSDmgPublishConfig> configs = [];
+
+  @override
+  Future<ReleasePackageResult> package(
+    ReleasePackageRequest request, {
+    required MacOSDmgPublishConfig config,
+    MacOSPublishConfig? publishConfig,
+  }) async {
+    requests.add(request);
+    configs.add(config);
+    await request.outputDirectory.create(recursive: true);
+    final artifact = File(
+      path.join(request.outputDirectory.path, "Egas-Manager-2.1.0-macos.dmg"),
+    );
+    await artifact.writeAsString("dmg");
+    final release =
+        File(path.join(request.outputDirectory.path, "release.json"));
+    final descriptor = ReleaseDescriptor(
+      schemaVersion: 3,
+      packageId: request.packageId,
+      appName: request.appName,
+      version: request.version,
+      buildNumber: request.buildNumber,
+      platform: request.platform,
+      channel: request.channel,
+      artifact: ReleaseArtifact(
+        kind: "dmg",
+        url: request.artifactUrl,
+        sha256: "c" * 64,
+        length: await artifact.length(),
+      ),
+      install: ReleaseInstall(
+        strategy: "wholeBundleReplace",
+        macosDmg: ReleaseMacOSDmgInstall(
+          appBundleName: config.appBundleName,
+          verifyPrimarySignature: true,
+        ),
+      ),
+      minimumUpdaterVersion: request.minimumUpdaterVersion,
+      generatedAt: DateTime.utc(2026, 6, 12),
+    );
+    await release.writeAsString(
+      const JsonEncoder.withIndent("  ").convert(descriptor.toJson()),
+    );
+    return ReleasePackageResult(
+      artifact: artifact,
+      releaseFile: release,
+      descriptor: descriptor,
+    );
+  }
+}
+
+class _FakePkgPackager extends PkgPackager {
+  _FakePkgPackager();
+
+  final List<ReleasePackageRequest> requests = [];
+  final List<MacOSPkgPublishConfig> configs = [];
+
+  @override
+  Future<ReleasePackageResult> package(
+    ReleasePackageRequest request, {
+    required MacOSPkgPublishConfig config,
+    MacOSPublishConfig? publishConfig,
+  }) async {
+    requests.add(request);
+    configs.add(config);
+    await request.outputDirectory.create(recursive: true);
+    final artifact = File(
+      path.join(request.outputDirectory.path, "Egas-Manager-2.1.0-macos.pkg"),
+    );
+    await artifact.writeAsString("pkg");
+    final release =
+        File(path.join(request.outputDirectory.path, "release.json"));
+    final descriptor = ReleaseDescriptor(
+      schemaVersion: 3,
+      packageId: request.packageId,
+      appName: request.appName,
+      version: request.version,
+      buildNumber: request.buildNumber,
+      platform: request.platform,
+      channel: request.channel,
+      artifact: ReleaseArtifact(
+        kind: "pkgInstaller",
+        url: request.artifactUrl,
+        sha256: "d" * 64,
+        length: await artifact.length(),
+      ),
+      install: ReleaseInstall(
+        strategy: "pkgInstaller",
+        macosPkg: ReleaseMacOSPkgInstall(
+          launchMode: "installerApp",
+          expectedPackageIds: [config.packageIdentifier],
+          relaunchAfterInstall: false,
+        ),
+      ),
+      minimumUpdaterVersion: request.minimumUpdaterVersion,
+      generatedAt: DateTime.utc(2026, 6, 12),
+    );
+    await release.writeAsString(
+      const JsonEncoder.withIndent("  ").convert(descriptor.toJson()),
+    );
+    return ReleasePackageResult(
+      artifact: artifact,
+      releaseFile: release,
+      descriptor: descriptor,
+    );
+  }
+}
+
+Future<ProcessResult> _fakeMacOSNotarizationProcess(
+  String executable,
+  List<String> arguments,
+) async {
+  if (executable == "/usr/bin/xcrun" && arguments.contains("notarytool")) {
+    return ProcessResult(
+      0,
+      0,
+      '{"status":"Accepted","id":"notary-test"}',
+      "",
+    );
+  }
+  return ProcessResult(0, 0, "", "");
 }

@@ -14,6 +14,7 @@ void main() {
     expect(source, contains("docs/diagnostics-and-recovery.md"));
     expect(source, contains("docs/ui-widgets.md#diagnostics-and-support"));
     expect(source, contains("docs/publishing.md#runtime-policies"));
+    expect(source, contains("docs/windows-inno-installer-updates.md"));
     expect(source, isNot(contains("native helper diagnostics plan")));
     expect(source, isNot(contains("docs/plans")));
   });
@@ -48,6 +49,11 @@ void main() {
     expect(source, contains("one JSON object per line"));
     expect(source, contains("helper scheduled"));
     expect(source, contains("relaunch attempt"));
+    expect(source, contains("cleanup retry"));
+    expect(source, contains("inno installer start"));
+    expect(source, contains("inno authenticode verified"));
+    expect(source, contains("desktop_updater_stage_*"));
+    expect(source, contains("stale-staging window"));
     expect(source, contains("does not include a logging backend"));
     expect(source, isNot(contains("docs/plans")));
   });
@@ -70,15 +76,42 @@ void main() {
     expect(source, contains("descriptor signing"));
     expect(source, contains("repository signing"));
     expect(source, contains("Default package behavior writes no files"));
+    expect(source, contains("Inno Setup"));
+    expect(source, contains("unins###.exe"));
+    expect(source, contains("not full Inno installer updating"));
+  });
+
+  test("publishing docs describe full Inno installer update mode", () {
+    final source = [
+      File("docs/windows-inno-installer-updates.md").readAsStringSync(),
+      File("docs/publishing.md").readAsStringSync(),
+      File("docs/windows-linux-production-release.md").readAsStringSync(),
+      File("docs/diagnostics-and-recovery.md").readAsStringSync(),
+    ].join("\n");
+
+    expect(source, contains("Inno installer update mode"));
+    expect(source, contains("Inno owns the uninstall log"));
+    expect(source, contains("artifact.kind"));
+    expect(source, contains("innoInstaller"));
+    expect(source, contains("mode: generated"));
+    expect(source, contains("mode: script"));
+    expect(source, contains("authenticodeThumbprints"));
+    expect(source, contains("Windows Inno Installer Updates"));
   });
 
   test("package metadata and changelog agree on current version", () {
     final pubspec = File("pubspec.yaml").readAsStringSync();
     final changelog = File("CHANGELOG.md").readAsStringSync();
+    final packageVersion =
+        File("lib/src/package_version.dart").readAsStringSync();
     final version = _currentPackageVersion();
 
     expect(pubspec, contains("version: $version"));
     expect(changelog, startsWith("## $version"));
+    expect(
+      packageVersion,
+      contains('desktopUpdaterPackageVersion = "$version"'),
+    );
     expect(changelog, contains("MandatoryReadyToInstallBehavior"));
     expect(changelog, contains("supportPolicy"));
     expect(changelog, contains("freshInstall"));

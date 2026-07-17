@@ -31,10 +31,10 @@ Think of your update host as one shelf on the internet.
 1. Your app knows one URL: `https://updates.example.com/app-archive.json`.
 2. `app-archive.json` says which releases exist for each platform and channel.
 3. Each item points to a versioned `release.json`.
-4. `release.json` points to one zip and records its length and SHA-256.
-5. The app downloads the zip only after it has selected a valid newer release.
-6. The app checks the zip length and hash before staging or installing it.
-7. The publisher uploads the zip and `release.json` first.
+4. `release.json` points to one artifact and records its length and SHA-256.
+5. The app downloads the artifact only after it has selected a valid newer release.
+6. The app checks the artifact length and hash before staging or installing it.
+7. The publisher uploads the artifact and `release.json` first.
 8. The publisher uploads `app-archive.json` last, so users never see an index
    entry whose release files are missing.
 9. `release validate` pretends to be an older app and tests the hosted files in
@@ -66,7 +66,8 @@ best release for the current platform, channel, and installed version.
 }
 ```
 
-`release.json` describes exactly one zip artifact.
+`release.json` describes exactly one artifact. Most platforms use a zip
+artifact; Windows can also use an Inno Setup installer artifact.
 
 ```json
 {
@@ -135,6 +136,7 @@ Supported install strategies:
 
 - `wholeBundleReplace`: macOS `.app` bundle replacement.
 - `wholeDirectoryReplace`: Windows and Linux app directory replacement.
+- `innoInstaller`: Windows Inno Setup installer execution.
 
 The optional `signature` field adds package-owned metadata authenticity for
 `release.json`. It signs the canonical descriptor bytes with the signature
@@ -954,6 +956,62 @@ Important trust boundary:
 - If you need production-trusted macOS updates, configure that explicit
   notarization gate before packaging the artifact that will be uploaded.
 
+macOS can publish three artifact kinds. Direct zip remains the default. DMG
+artifacts are for first-install distribution UX and DMG update artifacts that
+mount and copy a verified `.app`. PKG artifacts are installer-owned updates that
+hand off to Installer.app.
+
+Quick config notes:
+
+- `macos.artifact.kind: dmg` writes `artifact.kind: dmg` and keeps
+  `install.strategy: wholeBundleReplace`.
+- `macos.artifact.kind: pkg` writes `artifact.kind: pkgInstaller` and
+  `install.strategy: pkgInstaller`.
+- PKG mode requires `packageIdentifier`, `signingIdentifier`, notarization, and
+  stapling because runtime validation expects a signed, notarized, stapled PKG.
+
+DMG example:
+
+```yaml
+updates:
+  baseUrl: https://updates.example.com
+macos:
+  notarize: true
+  developerIdApplication: "Developer ID Application: Example Corp (TEAMID1234)"
+  notaryProfile: desktop-updater-notary
+  keychain: /Users/me/Library/Keychains/login.keychain-db
+  artifact:
+    kind: dmg
+  dmg:
+    volumeName: Example
+    appBundleName: Example.app
+    applicationsAlias: true
+```
+
+PKG example:
+
+```yaml
+updates:
+  baseUrl: https://updates.example.com
+macos:
+  notarize: true
+  developerIdApplication: "Developer ID Application: Example Corp (TEAMID1234)"
+  notaryProfile: desktop-updater-notary
+  keychain: /Users/me/Library/Keychains/login.keychain-db
+  staple: true
+  artifact:
+    kind: pkg
+  pkg:
+    packageIdentifier: com.example.app.pkg
+    installLocation: /Applications
+    signingIdentifier: "Developer ID Installer: Example Corp (TEAMID1234)"
+```
+
+For support boundaries, Apple acceptance gates, Move to Applications, and the
+local production smoke harness, see
+[macOS DMG and PKG installer updates](macos-dmg-pkg-installer-updates.md)
+(repo path: `docs/macos-dmg-pkg-installer-updates.md`).
+
 What you must do for production-trusted macOS updates:
 
 - Sign with a `Developer ID Application` identity.
@@ -1117,6 +1175,25 @@ What you should do for production trust:
 - Keep the app executable and package identity stable.
 - Test update install from a normal user account, not only an admin shell.
 
+For apps that were originally installed with Inno Setup, Windows direct zip
+updates preserve Inno uninstall artifacts named `unins###.exe`,
+`unins###.dat`, and `unins###.msg` in the app root. This keeps the existing
+Windows uninstall entry usable when the updater replaces the Flutter Release
+payload.
+
+This is Inno-compatible direct zip updating, not full Inno installer updating.
+The updater does not download or execute an Inno `.exe` installer, and it does
+not regenerate Inno's uninstall log. If a zip update adds new files that were
+not part of the original installer, Inno may leave those files behind during
+uninstall.
+
+A successful Windows install should remove its `desktop_updater_stage_*`
+directory after the payload copy succeeds. If the app downloads an update but
+the install is cancelled, never handed to the native helper, or fails before the
+successful copy point, a staging directory can remain temporarily. Future update
+checks prune stale staging directories conservatively after they age past the
+cleanup window.
+
 When the app is installed under a protected machine-wide directory such as
 `C:\Program Files`, the Windows helper treats that install root as requiring
 elevation when the current process is not already elevated. It also checks
@@ -1133,6 +1210,44 @@ still see publisher-trust warnings.
 For Authenticode, Microsoft Artifact Signing, MSIX/Store, winget, enterprise
 trust, and country/provider constraints, see
 [Windows And Linux Production Release Options](windows-linux-production-release.md).
+
+### Windows Inno Installer Update Mode
+
+Windows releases can publish an Inno Setup `.exe` installer instead of a direct
+zip artifact. Inno installer update mode writes `artifact.kind:
+innoInstaller` and `install.strategy: innoInstaller` in `release.json`. The
+updater downloads and verifies the installer, stages it without extraction,
+exits the app, and the Windows helper runs the installer with the configured
+silent arguments.
+
+Inno owns the uninstall log, registry entry, installed file list, repair,
+modify, and uninstall behavior. This is the mode to use when uninstall cleanup
+must include files introduced by later updates. The updater does not edit or
+regenerate `unins###.dat`; Inno Setup owns that metadata.
+
+Example config:
+
+```yaml
+updates:
+  baseUrl: https://updates.example.com/
+windows:
+  installer:
+    kind: inno
+    mode: generated
+    appId: com.example.app
+    publisher: Example Inc.
+    privilegesRequired: admin
+    silentArgs:
+      - /VERYSILENT
+      - /SUPPRESSMSGBOXES
+      - /NORESTART
+    authenticodeThumbprints:
+      - 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF
+```
+
+For generated scripts, custom scripts, Authenticode policy, runtime behavior,
+and migration guidance, see
+[Windows Inno Installer Updates](windows-inno-installer-updates.md).
 
 ### Linux
 

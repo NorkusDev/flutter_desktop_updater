@@ -2,10 +2,12 @@ import "dart:convert";
 import "dart:io";
 
 import "package:desktop_updater/src/core/artifact_verifier.dart";
+import "package:desktop_updater/src/core/macos_distribution_artifacts.dart";
 import "package:desktop_updater/src/core/macos_staged_app_validator.dart";
 import "package:desktop_updater/src/core/release_descriptor.dart";
 import "package:desktop_updater/src/core/release_index.dart";
 import "package:desktop_updater/src/core/safe_zip_extractor.dart";
+import "package:desktop_updater/src/core/staging_directory_cleanup.dart";
 import "package:desktop_updater/src/core/update_telemetry.dart";
 import "package:desktop_updater/src/io/composite_update_transport.dart";
 import "package:desktop_updater/src/io/http_update_transport.dart"
@@ -43,6 +45,8 @@ class UpdateClient {
     SafeZipExtractor extractor = const SafeZipExtractor(),
     Directory? stagingParent,
     ProcessRunner runProcess = defaultProcessRunner,
+    MacOSDistributionVerifier macosDistributionVerifier =
+        const MacOSDistributionVerifier(),
     MinimumOSSupportChecker? isMinimumOSSupported,
     DesktopUpdaterTelemetry? telemetry,
     this.installationIdentity,
@@ -57,6 +61,7 @@ class UpdateClient {
         _extractor = extractor,
         _stagingParent = stagingParent,
         _runProcess = runProcess,
+        _macosDistributionVerifier = macosDistributionVerifier,
         _isMinimumOSSupported = isMinimumOSSupported,
         _telemetry = telemetry;
 
@@ -81,6 +86,7 @@ class UpdateClient {
   final SafeZipExtractor _extractor;
   final Directory? _stagingParent;
   final ProcessRunner _runProcess;
+  final MacOSDistributionVerifier _macosDistributionVerifier;
   final MinimumOSSupportChecker? _isMinimumOSSupported;
   final DesktopUpdaterTelemetry? _telemetry;
 
@@ -143,9 +149,22 @@ class UpdateClient {
     await _verifier.verifyDescriptor(descriptor);
     _ensureDescriptorPolicyAllowsDownload(descriptor);
 
-    final stagingRoot = await (_stagingParent ?? Directory.systemTemp)
-        .createTemp("desktop_updater_stage_");
-    final artifactFile = File(path.join(stagingRoot.path, "artifact.zip"));
+    final stagingParent = _stagingParent ?? Directory.systemTemp;
+    await cleanupStaleDesktopUpdaterStagingDirectories(parent: stagingParent);
+    final stagingRoot = await stagingParent.createTemp(
+      desktopUpdaterStagingPrefix,
+    );
+    final artifactFile = File(
+      path.join(
+        stagingRoot.path,
+        switch (descriptor.artifact.kind) {
+          "dmg" => "artifact.dmg",
+          "pkgInstaller" => "artifact.pkg",
+          "innoInstaller" => "artifact.exe",
+          _ => "artifact.zip",
+        },
+      ),
+    );
 
     try {
       await _transport.download(
@@ -164,8 +183,83 @@ class UpdateClient {
           version: descriptor.version,
           channel: descriptor.channel,
           platform: descriptor.platform,
+          artifactKind: descriptor.artifact.kind,
+          installStrategy: descriptor.install.strategy,
         ),
       );
+
+      if (descriptor.artifact.kind == "innoInstaller") {
+        if (descriptor.platform != "windows" || platform != "windows") {
+          throw UnsupportedError(
+            "Inno installer updates are only supported on Windows.",
+          );
+        }
+        final installerFile =
+            File(path.join(stagingRoot.path, "installer.exe"));
+        await artifactFile.rename(installerFile.path);
+        await File(
+          path.join(stagingRoot.path, stagedReleaseManifestFileName),
+        ).writeAsString(
+          const JsonEncoder.withIndent("  ").convert(descriptor.toJson()),
+        );
+        return UpdateStageResult(
+          descriptor: descriptor,
+          stagingPath: stagingRoot.path,
+        );
+      }
+
+      if (descriptor.artifact.kind == "dmg") {
+        if (descriptor.platform != "macos" || platform != "macos") {
+          throw UnsupportedError("DMG updates are only supported on macOS.");
+        }
+        final dmg = descriptor.install.macosDmg!;
+        final stagedApp =
+            await _macosDistributionVerifier.withMountedVerifiedDmg<Directory>(
+          dmg: artifactFile,
+          verifyPrimarySignature: dmg.verifyPrimarySignature,
+          body: (mounted) {
+            return _macosDistributionVerifier.copyAppFromMountedDmg(
+              mounted: mounted,
+              appBundleName: dmg.appBundleName,
+              destinationParent: stagingRoot,
+            );
+          },
+        );
+        await rejectTopLevelMacOSAppSymlink(stagedApp.path);
+        await File(
+          path.join(stagingRoot.path, stagedReleaseManifestFileName),
+        ).writeAsString(
+          const JsonEncoder.withIndent("  ").convert(descriptor.toJson()),
+        );
+        return UpdateStageResult(
+          descriptor: descriptor,
+          stagingPath: stagedApp.path,
+        );
+      }
+
+      if (descriptor.artifact.kind == "pkgInstaller") {
+        if (descriptor.platform != "macos" || platform != "macos") {
+          throw UnsupportedError(
+            "PKG installer updates are only supported on macOS.",
+          );
+        }
+        await _macosDistributionVerifier.verifyPkgInstaller(
+          pkg: artifactFile,
+          expectedPackageIds: descriptor.install.macosPkg!.expectedPackageIds,
+        );
+        final installerFile =
+            File(path.join(stagingRoot.path, "installer.pkg"));
+        await artifactFile.rename(installerFile.path);
+        await File(
+          path.join(stagingRoot.path, stagedReleaseManifestFileName),
+        ).writeAsString(
+          const JsonEncoder.withIndent("  ").convert(descriptor.toJson()),
+        );
+        return UpdateStageResult(
+          descriptor: descriptor,
+          stagingPath: stagingRoot.path,
+        );
+      }
 
       if (descriptor.platform == "macos") {
         await runDittoExtractZip(

@@ -2,14 +2,15 @@
 
 Flutter desktop updater plugin for macOS, Windows, and Linux.
 
-2.x uses one small update index, one release descriptor, and one verified zip:
+2.x uses one small update index, one release descriptor, and one verified
+artifact:
 
 ```text
-app-archive.json -> release.json -> app.zip
+app-archive.json -> release.json -> app.zip / installer artifact
 ```
 
 No public folder listing is required. Clients fetch exact URLs and verify the
-zip length and SHA-256 before installation.
+artifact length and SHA-256 before installation.
 
 ![flutter_desktop_updater](https://github.com/user-attachments/assets/b05d9a13-0f44-4213-b3bd-58e07c18226d)
 
@@ -19,7 +20,7 @@ Add the package:
 
 ```yaml
 dependencies:
-  desktop_updater: ^2.4.3
+  desktop_updater: ^2.7.0
 ```
 
 Point your app at the hosted archive:
@@ -282,8 +283,14 @@ desktop_updater handles update mechanics. Your app still owns platform trust:
   enabled, notarized, stapled, and Gatekeeper accepted before packaging.
 - Windows production updates should use Authenticode when publisher trust is
   required.
+- Windows can publish direct zip artifacts or
+  [Inno Setup installer artifacts](docs/windows-inno-installer-updates.md).
 - Linux direct zip distribution should add descriptor signing or another
   publisher-authenticity policy when production trust matters.
+
+For macOS DMG first installs, DMG update artifacts, PKG installer artifacts,
+and the local Apple-trust smoke harness, see
+[macOS DMG and PKG installer updates](docs/macos-dmg-pkg-installer-updates.md).
 
 ## Documentation
 
@@ -295,6 +302,8 @@ desktop_updater handles update mechanics. Your app still owns platform trust:
 - [Windows and Linux production release options](docs/windows-linux-production-release.md):
   signing choices, native package channels, and country or provider
   restrictions.
+- [Windows Inno installer updates](docs/windows-inno-installer-updates.md):
+  full Inno installer mode, config, signing, and migration boundaries.
 - [Ready-made UI widgets](docs/ui-widgets.md): screenshots and guidance for
   the built-in card, sliver, dialog, and custom state-driven UI surfaces.
 - [Localization and i18n](docs/localization.md): bundled translations, custom

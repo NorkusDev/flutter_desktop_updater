@@ -146,6 +146,58 @@ void main() {
     expect(pruneIndex, lessThan(copyIndex));
   });
 
+  test("Windows helper preserves Inno uninstall artifacts during prune", () {
+    final source =
+        File("windows/desktop_updater_plugin.cpp").readAsStringSync();
+    const predicateSnippet = "function Test-InstallerOwnedWindowsFile";
+    const preserveCondition =
+        r"$_.PSIsContainer -or -not (Test-InstallerOwnedWindowsFile $_.Name)";
+    const preserveEvent = "preserve installer file";
+    const pruneSnippet = r"Get-ChildItem -LiteralPath $target -Force";
+    const copySnippet =
+        r"Copy-Item -LiteralPath $_.FullName -Destination $target -Recurse -Force";
+
+    final predicateIndex = source.indexOf(predicateSnippet);
+    final pruneIndex = source.indexOf(pruneSnippet);
+    final conditionIndex = source.indexOf(preserveCondition);
+    final eventIndex = source.indexOf(preserveEvent);
+    final copyIndex = source.indexOf(copySnippet);
+
+    expect(predicateIndex, isNonNegative);
+    expect(pruneIndex, isNonNegative);
+    expect(conditionIndex, isNonNegative);
+    expect(eventIndex, isNonNegative);
+    expect(copyIndex, isNonNegative);
+    expect(predicateIndex, lessThan(pruneIndex));
+    expect(pruneIndex, lessThan(copyIndex));
+    expect(conditionIndex, lessThan(copyIndex));
+  });
+
+  test("Windows helper retries staging cleanup after successful copy", () {
+    final source =
+        File("windows/desktop_updater_plugin.cpp").readAsStringSync();
+    const cleanupFunction = "function Remove-StagingDirectoryWithRetry";
+    const retryEvent = "Write-DiagnosticsEvent 'cleanup retry'";
+    const cleanupCall = r"Remove-StagingDirectoryWithRetry -Path $staging";
+    const moveSuccess = "Write-DiagnosticsEvent 'move success'";
+    const relaunchSnippet = r"Start-Process -FilePath $exe";
+
+    final functionIndex = source.indexOf(cleanupFunction);
+    final retryIndex = source.indexOf(retryEvent);
+    final moveSuccessIndex = source.indexOf(moveSuccess);
+    final cleanupCallIndex = source.indexOf(cleanupCall);
+    final relaunchIndex = source.indexOf(relaunchSnippet);
+
+    expect(functionIndex, isNonNegative);
+    expect(retryIndex, isNonNegative);
+    expect(moveSuccessIndex, isNonNegative);
+    expect(cleanupCallIndex, isNonNegative);
+    expect(relaunchIndex, isNonNegative);
+    expect(functionIndex, lessThan(moveSuccessIndex));
+    expect(moveSuccessIndex, lessThan(cleanupCallIndex));
+    expect(cleanupCallIndex, lessThan(relaunchIndex));
+  });
+
   test("Windows helper updates uninstall DisplayVersion after overlay", () {
     final source =
         File("windows/desktop_updater_plugin.cpp").readAsStringSync();
@@ -164,6 +216,87 @@ void main() {
     expect(relaunchIndex, isNonNegative);
     expect(copyIndex, lessThan(registryIndex));
     expect(registryIndex, lessThan(relaunchIndex));
+  });
+
+  test("Windows helper executes staged Inno installer from manifest", () {
+    final source =
+        File("windows/desktop_updater_plugin.cpp").readAsStringSync();
+
+    const manifestSnippet =
+        r"$manifest = Join-Path $staging '.desktop_updater_release_manifest.json'";
+    const strategySnippet =
+        r"if ($descriptor.install.strategy -eq 'innoInstaller')";
+    const invokeSnippet = "function Invoke-InnoInstallerUpdate";
+    const installerPathSnippet =
+        r"$installer = Join-Path $staging 'installer.exe'";
+    const startSnippet = "Write-DiagnosticsEvent 'inno installer start'";
+    const waitSnippet = r"Start-Process -FilePath $installer";
+
+    final manifestIndex = source.indexOf(manifestSnippet);
+    final strategyIndex = source.indexOf(strategySnippet);
+    final invokeIndex = source.indexOf(invokeSnippet);
+    final installerPathIndex = source.indexOf(installerPathSnippet);
+    final startIndex = source.indexOf(startSnippet);
+    final waitIndex = source.indexOf(waitSnippet);
+
+    expect(invokeIndex, isNonNegative);
+    expect(manifestIndex, isNonNegative);
+    expect(strategyIndex, isNonNegative);
+    expect(installerPathIndex, isNonNegative);
+    expect(startIndex, isNonNegative);
+    expect(waitIndex, isNonNegative);
+    expect(invokeIndex, lessThan(strategyIndex));
+    expect(invokeIndex, lessThan(waitIndex));
+  });
+
+  test(
+      "macOS helper opens staged PKG installers without silent privilege escalation",
+      () {
+    final source = File(
+      "macos/desktop_updater/Sources/desktop_updater/DesktopUpdaterPlugin.swift",
+    ).readAsStringSync();
+
+    expect(source, contains("pkgInstaller"));
+    expect(source, contains("launchMode"));
+    expect(source, contains("installerApp"));
+    expect(source, contains("installer.pkg"));
+    expect(source, contains("pkg installer open"));
+    expect(source, contains("/usr/bin/open"));
+    expect(source, isNot(contains("/usr/sbin/installer -pkg")));
+    expect(source, isNot(contains("sudo")));
+    expect(source, isNot(contains("osascript")));
+
+    final pkgBranchIndex = source.indexOf("pkg manifest loaded");
+    final appValidationIndex = source.indexOf(r'case "$STAGING" in');
+    expect(pkgBranchIndex, isNonNegative);
+    expect(appValidationIndex, isNonNegative);
+    expect(pkgBranchIndex, lessThan(appValidationIndex));
+  });
+
+  test("macOS move to Applications avoids destructive replacement", () {
+    final source = File(
+      "macos/desktop_updater/Sources/desktop_updater/DesktopUpdaterPlugin.swift",
+    ).readAsStringSync();
+
+    expect(source, contains("sourceURL.path == destinationURL.path"));
+    expect(source, contains("desktop_updater_move_staging"));
+    expect(source, contains("desktop_updater_move_backup"));
+    expect(source, contains("restoreMoveBackup"));
+    expect(source,
+        isNot(contains("try fileManager.removeItem(at: destinationURL)")));
+  });
+
+  test("Windows helper verifies Authenticode thumbprints for Inno installers",
+      () {
+    final source =
+        File("windows/desktop_updater_plugin.cpp").readAsStringSync();
+
+    expect(source, contains("function Test-AuthenticodePolicy"));
+    expect(source, contains(r"Get-AuthenticodeSignature -FilePath $installer"));
+    expect(source, contains("SignerCertificate"));
+    expect(source, contains("Thumbprint"));
+    expect(source, contains("inno authenticode verified"));
+    expect(source, contains("inno authenticode failure"));
   });
 
   test("Windows helper requests UAC with verified script for protected targets",

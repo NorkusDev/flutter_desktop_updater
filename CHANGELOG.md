@@ -1,3 +1,43 @@
+## 2.7.0
+
+* Added production macOS DMG and PKG artifact publishing, validation, and local
+  smoke evidence flows while preserving direct `.app.zip` whole-bundle update
+  behavior.
+* Added a macOS move-to-Applications prompt for apps launched from disk images.
+* Added DMG update staging that mounts a verified DMG, copies the contained
+  `.app`, and hands off to the existing whole-bundle replacement helper.
+* Added PKG update staging that verifies signed, notarized installer packages
+  and hands them to Installer.app without silent privileged installation.
+* Added full Windows Inno installer update mode, including installer
+  descriptors, installer staging without zip extraction, Windows helper
+  execution, Authenticode policy checks, release CLI publish support, and
+  documentation for generated and custom Inno scripts.
+* Fixed Windows Inno release publishing so custom installer output names stay
+  consistent across the generated script, local artifact, release descriptor,
+  publish manifest, hooks, upload, and validation.
+* Documented macOS DMG first-install, DMG update, PKG installer update, and
+  Windows Inno installer support boundaries.
+
+## 2.4.5
+
+* Preserved Inno Setup uninstall artifacts named `unins###.exe`,
+  `unins###.dat`, and `unins###.msg` during Windows direct zip
+  `wholeDirectoryReplace` updates.
+* Retried Windows staging cleanup after a successful payload copy without
+  rolling back the already-installed update when cleanup still fails.
+* Added conservative Dart cleanup for old `desktop_updater_stage_*` directories
+  before creating a new staging directory.
+* Documented the Inno-compatible direct zip update boundary and clarified that
+  the updater still does not download or execute Inno `.exe` installers.
+
+## 2.4.4
+
+* Fixed macOS `release publish` metadata so `release.json` preserves the
+  top-level `.app` bundle name while generated artifact zip filenames keep the
+  existing extension-stripped format.
+* Added regression coverage for macOS bundle-name staging metadata and
+  cross-platform zip packaging behavior.
+
 ## 2.4.3
 
 * Previewed a Windows protected-directory install fix that treats
